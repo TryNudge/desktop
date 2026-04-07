@@ -19,8 +19,12 @@
   let cursorLoaded = false;
   let globalTime = 0;
 
-  cursorImg.onload = () => { cursorLoaded = true; };
-  cursorImg.onerror = () => {};
+  // Image may have already loaded before external JS runs
+  if (cursorImg.complete && cursorImg.naturalWidth > 0) {
+    cursorLoaded = true;
+  } else {
+    cursorImg.onload = () => { cursorLoaded = true; };
+  }
 
   function resizeCanvas() {
     canvas.width = window.innerWidth;

@@ -55,7 +55,8 @@
       const my = monitor.position.y / sf;
       const mw = monitor.size.width / sf;
       const mh = monitor.size.height / sf;
-      await win.setPosition(new window.__TAURI__.window.LogicalPosition(mx + mw - 360, my + mh - 130));
+      // 480px window width + 20px padding from edge, 60px from bottom
+      await win.setPosition(new window.__TAURI__.window.LogicalPosition(mx + mw - 500, my + mh - 100));
     }
     await win.show();
   }

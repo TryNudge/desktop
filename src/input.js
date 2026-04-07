@@ -5,7 +5,6 @@
   // Force WebView2 transparent background via JS API
   getCurrentWindow().setBackgroundColor({ r: 0, g: 0, b: 0, a: 0 }).catch(() => {});
 
-  const container = document.querySelector('.input-container');
   const input = document.getElementById('query');
   const spinner = document.getElementById('spinner');
   const hint = document.getElementById('hint');
@@ -30,11 +29,6 @@
   listen('auth-success', () => checkAuth());
 
   getCurrentWindow().listen('tauri://focus', () => {
-    // Replay open animation
-    container.style.animation = 'none';
-    container.offsetHeight; // force reflow
-    container.style.animation = '';
-
     input.value = '';
     input.focus();
     checkAuth();
