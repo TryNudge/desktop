@@ -1,0 +1,223 @@
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html { background: transparent !important; }
+  body {
+    background: rgb(20, 20, 24) !important;
+    font-family: 'Inter', system-ui, sans-serif;
+    color: rgba(255,255,255,0.9);
+    overflow: hidden;
+  }
+
+  .window {
+    background: rgb(20, 20, 24);
+    overflow: hidden;
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* ── Title bar ── */
+  .titlebar {
+    display: flex;
+    align-items: center;
+    padding: 16px 20px 12px;
+    gap: 12px;
+    -webkit-app-region: drag;
+  }
+  .titlebar img {
+    width: 28px;
+    height: 28px;
+    border-radius: 8px;
+    -webkit-app-region: no-drag;
+  }
+  .titlebar h1 {
+    font-size: 16px;
+    font-weight: 700;
+    flex: 1;
+    letter-spacing: -0.3px;
+  }
+  .titlebar .version {
+    font-size: 11px;
+    color: rgba(255,255,255,0.25);
+    font-weight: 500;
+  }
+  .close-btn {
+    -webkit-app-region: no-drag;
+    width: 28px;
+    height: 28px;
+    border: none;
+    background: rgba(255,255,255,0.05);
+    border-radius: 8px;
+    color: rgba(255,255,255,0.4);
+    font-size: 14px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.15s;
+  }
+  .close-btn:hover { background: rgba(255,60,60,0.15); color: rgba(255,100,100,0.9); }
+
+  /* ── Content ── */
+  .content {
+    flex: 1;
+    overflow-y: auto;
+    padding: 0 20px 20px;
+  }
+  .content::-webkit-scrollbar { width: 4px; }
+  .content::-webkit-scrollbar-track { background: transparent; }
+  .content::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 4px; }
+
+  /* ── Sections ── */
+  .section {
+    margin-bottom: 20px;
+  }
+  .section-title {
+    font-size: 11px;
+    font-weight: 700;
+    color: rgba(255,255,255,0.35);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-bottom: 10px;
+  }
+  .card {
+    background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(255,255,255,0.06);
+    border-radius: 14px;
+    padding: 14px 16px;
+  }
+
+  /* ── Input field ── */
+  .field {
+    margin-bottom: 12px;
+  }
+  .field:last-child { margin-bottom: 0; }
+  .field label {
+    display: block;
+    font-size: 12px;
+    font-weight: 600;
+    color: rgba(255,255,255,0.6);
+    margin-bottom: 6px;
+  }
+  .field input[type="text"],
+  .field input[type="password"] {
+    width: 100%;
+    padding: 9px 12px;
+    background: rgba(0,0,0,0.25);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 10px;
+    color: rgba(255,255,255,0.9);
+    font-family: 'Inter', system-ui, sans-serif;
+    font-size: 13px;
+    outline: none;
+    transition: border-color 0.2s;
+  }
+  .field input:focus {
+    border-color: rgba(255,255,255,0.18);
+  }
+  .field input::placeholder {
+    color: rgba(255,255,255,0.2);
+  }
+  .field-hint {
+    font-size: 11px;
+    color: rgba(255,255,255,0.25);
+    margin-top: 4px;
+  }
+
+  /* ── Toggle row ── */
+  .toggle-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 0;
+    border-bottom: 1px solid rgba(255,255,255,0.04);
+  }
+  .toggle-row:last-child { border-bottom: none; }
+  .toggle-label {
+    font-size: 13px;
+    font-weight: 500;
+  }
+  .toggle-desc {
+    font-size: 11px;
+    color: rgba(255,255,255,0.3);
+    margin-top: 2px;
+  }
+
+  /* Toggle switch */
+  .toggle {
+    position: relative;
+    width: 40px;
+    height: 22px;
+    flex-shrink: 0;
+  }
+  .toggle input {
+    opacity: 0;
+    width: 0;
+    height: 0;
+  }
+  .toggle .slider {
+    position: absolute;
+    inset: 0;
+    background: rgba(255,255,255,0.1);
+    border-radius: 11px;
+    cursor: pointer;
+    transition: background 0.2s;
+  }
+  .toggle .slider::before {
+    content: '';
+    position: absolute;
+    width: 16px;
+    height: 16px;
+    left: 3px;
+    top: 3px;
+    background: rgba(255,255,255,0.5);
+    border-radius: 50%;
+    transition: transform 0.2s, background 0.2s;
+  }
+  .toggle input:checked + .slider {
+    background: rgba(43, 43, 43, 0.9);
+  }
+  .toggle input:checked + .slider::before {
+    transform: translateX(18px);
+    background: white;
+  }
+
+  /* ── Keybind buttons ── */
+  .keybind-btn {
+    padding: 5px 12px;
+    background: rgba(0,0,0,0.3);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 8px;
+    font-family: 'Inter', system-ui, sans-serif;
+    font-size: 12px;
+    font-weight: 600;
+    color: rgba(255,255,255,0.6);
+    cursor: pointer;
+    transition: all 0.15s ease;
+    min-width: 80px;
+    text-align: center;
+  }
+  .keybind-btn:hover {
+    background: rgba(255,255,255,0.06);
+    border-color: rgba(255,255,255,0.18);
+    color: rgba(255,255,255,0.8);
+  }
+  .keybind-btn.recording {
+    background: rgba(80, 120, 255, 0.15);
+    border-color: rgba(80, 120, 255, 0.4);
+    color: rgba(180, 200, 255, 0.9);
+    animation: pulse-border 1.5s ease-in-out infinite;
+  }
+  @keyframes pulse-border {
+    0%, 100% { border-color: rgba(80, 120, 255, 0.4); }
+    50% { border-color: rgba(80, 120, 255, 0.7); }
+  }
+
+  /* ── Save status ── */
+  .save-status {
+    font-size: 11px;
+    color: rgba(255,255,255,0.3);
+    text-align: center;
+    padding: 8px;
+    transition: opacity 0.3s;
+  }
+  .save-status.saved { color: rgba(120, 220, 120, 0.6); }
