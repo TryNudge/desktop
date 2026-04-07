@@ -37,7 +37,7 @@ jobs:
         run: pip install -r requirements.txt
 
       - name: Install Tauri CLI
-        run: cargo install tauri-cli --version "^2"
+        run: npm install -g @tauri-apps/cli@latest
 
       - name: Build Tauri app
         env:
@@ -45,14 +45,15 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: cargo tauri build
 
+      - name: List build output
+        run: dir src-tauri\target\release\bundle\nsis\
+        shell: cmd
+
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: windows-installers
-          path: |
-            src-tauri/target/release/bundle/nsis/*.exe
-            src-tauri/target/release/bundle/nsis/*.nsis.zip
-            src-tauri/target/release/bundle/nsis/*.nsis.zip.sig
+          path: src-tauri/target/release/bundle/nsis/
 
   publish-release:
     needs: build-windows
@@ -66,6 +67,9 @@ jobs:
           name: windows-installers
           path: artifacts
 
+      - name: List downloaded artifacts
+        run: ls -laR artifacts/
+
       - name: Get version from tag
         id: version
         run: |
@@ -77,38 +81,47 @@ jobs:
             echo "tag=v0.0.0-dev" >> $GITHUB_OUTPUT
           fi
 
-      - name: Find build artifacts
+      - name: Identify artifacts
         id: artifacts
         run: |
-          NSIS_ZIP=$(find artifacts -name "*.nsis.zip" | head -1)
-          NSIS_SIG=$(find artifacts -name "*.nsis.zip.sig" | head -1)
-          INSTALLER=$(find artifacts -name "*.exe" | head -1)
-          echo "nsis_zip=$NSIS_ZIP" >> $GITHUB_OUTPUT
-          echo "nsis_sig=$NSIS_SIG" >> $GITHUB_OUTPUT
-          echo "installer=$INSTALLER" >> $GITHUB_OUTPUT
-          echo "Found: $NSIS_ZIP, $NSIS_SIG, $INSTALLER"
+          cd artifacts
+          NSIS_ZIP=$(ls *.nsis.zip 2>/dev/null | head -1)
+          NSIS_SIG=$(ls *.nsis.zip.sig 2>/dev/null | head -1)
+          INSTALLER=$(ls *.exe 2>/dev/null | head -1)
 
-      - name: Read signature
-        id: sig
-        run: |
-          SIG=$(cat "${{ steps.artifacts.outputs.nsis_sig }}")
-          echo "signature=$SIG" >> $GITHUB_OUTPUT
+          echo "nsis_zip=artifacts/$NSIS_ZIP" >> $GITHUB_OUTPUT
+          echo "nsis_sig=artifacts/$NSIS_SIG" >> $GITHUB_OUTPUT
+          echo "installer=artifacts/$INSTALLER" >> $GITHUB_OUTPUT
+          echo "nsis_zip_name=$NSIS_ZIP" >> $GITHUB_OUTPUT
+
+          echo "Found zip=$NSIS_ZIP sig=$NSIS_SIG exe=$INSTALLER"
+
+          if [ -z "$NSIS_SIG" ]; then
+            echo "ERROR: No .nsis.zip.sig file found!"
+            exit 1
+          fi
 
       - name: Generate latest.json
         run: |
-          cat > latest.json << EOF
+          SIG=$(cat "${{ steps.artifacts.outputs.nsis_sig }}")
+          TAG="${{ steps.version.outputs.tag }}"
+          VERSION="${{ steps.version.outputs.version }}"
+          ZIP_NAME="${{ steps.artifacts.outputs.nsis_zip_name }}"
+
+          cat > latest.json <<EOJSON
           {
-            "version": "${{ steps.version.outputs.version }}",
-            "notes": "Release ${{ steps.version.outputs.tag }}",
+            "version": "$VERSION",
+            "notes": "Release $TAG",
             "pub_date": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
             "platforms": {
               "windows-x86_64": {
-                "signature": "${{ steps.sig.outputs.signature }}",
-                "url": "https://github.com/TryNudge/desktop/releases/download/${{ steps.version.outputs.tag }}/$(basename ${{ steps.artifacts.outputs.nsis_zip }})"
+                "signature": "$SIG",
+                "url": "https://github.com/TryNudge/desktop/releases/download/$TAG/$ZIP_NAME"
               }
             }
           }
-          EOF
+          EOJSON
+          echo "--- latest.json ---"
           cat latest.json
 
       - name: Create GitHub Release
