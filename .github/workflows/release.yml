@@ -6,12 +6,16 @@ on:
       - "v*"
   workflow_dispatch:
 
-permissions:
-  contents: write
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  build-windows:
+  build-and-release:
     runs-on: windows-latest
+    permissions:
+      contents: write
+
     steps:
       - uses: actions/checkout@v4
 
@@ -37,106 +41,17 @@ jobs:
         run: pip install -r requirements.txt
 
       - name: Install Tauri CLI
-        run: npm install -g @tauri-apps/cli@latest
+        run: cargo install tauri-cli --version "^2"
 
-      - name: Build Tauri app
-        shell: bash
-        run: |
-          export TAURI_SIGNING_PRIVATE_KEY="$SIGNING_KEY"
-          export TAURI_SIGNING_PRIVATE_KEY_PASSWORD=""
-          npx tauri build
+      - uses: tauri-apps/tauri-action@v0
         env:
-          SIGNING_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-
-      - name: List build output
-        run: dir src-tauri\target\release\bundle\nsis\
-        shell: cmd
-
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
-          name: windows-installers
-          path: src-tauri/target/release/bundle/nsis/
-
-  publish-release:
-    needs: build-windows
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Download artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: windows-installers
-          path: artifacts
-
-      - name: List downloaded artifacts
-        run: ls -laR artifacts/
-
-      - name: Get version from tag
-        id: version
-        run: |
-          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
-            echo "version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
-            echo "tag=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
-          else
-            echo "version=0.0.0-dev" >> $GITHUB_OUTPUT
-            echo "tag=v0.0.0-dev" >> $GITHUB_OUTPUT
-          fi
-
-      - name: Identify artifacts
-        id: artifacts
-        run: |
-          cd artifacts
-          NSIS_ZIP=$(ls *.nsis.zip 2>/dev/null | head -1)
-          NSIS_SIG=$(ls *.nsis.zip.sig 2>/dev/null | head -1)
-          INSTALLER=$(ls *.exe 2>/dev/null | head -1)
-
-          echo "nsis_zip=artifacts/$NSIS_ZIP" >> $GITHUB_OUTPUT
-          echo "nsis_sig=artifacts/$NSIS_SIG" >> $GITHUB_OUTPUT
-          echo "installer=artifacts/$INSTALLER" >> $GITHUB_OUTPUT
-          echo "nsis_zip_name=$NSIS_ZIP" >> $GITHUB_OUTPUT
-
-          echo "Found zip=$NSIS_ZIP sig=$NSIS_SIG exe=$INSTALLER"
-
-          if [ -z "$NSIS_SIG" ]; then
-            echo "ERROR: No .nsis.zip.sig file found!"
-            exit 1
-          fi
-
-      - name: Generate latest.json
-        run: |
-          SIG=$(cat "${{ steps.artifacts.outputs.nsis_sig }}")
-          TAG="${{ steps.version.outputs.tag }}"
-          VERSION="${{ steps.version.outputs.version }}"
-          ZIP_NAME="${{ steps.artifacts.outputs.nsis_zip_name }}"
-
-          cat > latest.json <<EOJSON
-          {
-            "version": "$VERSION",
-            "notes": "Release $TAG",
-            "pub_date": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
-            "platforms": {
-              "windows-x86_64": {
-                "signature": "$SIG",
-                "url": "https://github.com/TryNudge/desktop/releases/download/$TAG/$ZIP_NAME"
-              }
-            }
-          }
-          EOJSON
-          echo "--- latest.json ---"
-          cat latest.json
-
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ steps.version.outputs.tag }}
-          name: Nudge ${{ steps.version.outputs.tag }}
-          draft: false
+          tauriScript: cargo tauri
+          tagName: v__VERSION__
+          releaseName: "Nudge v__VERSION__"
+          releaseBody: "Download the installer below to install Nudge."
+          releaseDraft: false
           prerelease: false
-          files: |
-            ${{ steps.artifacts.outputs.installer }}
-            ${{ steps.artifacts.outputs.nsis_zip }}
-            ${{ steps.artifacts.outputs.nsis_sig }}
-            latest.json
-          generate_release_notes: true
