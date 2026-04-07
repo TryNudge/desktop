@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html {
+    background: transparent !important;
+  }
+  body {
+    background: transparent !important;
+    overflow: hidden;
+    font-family: 'Inter', 'Segoe UI', system-ui, -apple-system, sans-serif;
+  }
+  .input-container {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 16px;
+    height: 100vh;
+    background: rgb(24, 24, 28);
+    border: none;
+    border-radius: 0;
+    transform: translateY(-8px) scaleX(0.96);
+    opacity: 0;
+    animation: slideIn 0.2s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  }
+  @keyframes slideIn {
+    to { transform: translateY(0) scaleX(1); opacity: 1; }
+  }
+  .nudge-icon {
+    width: 30px;
+    height: 30px;
+    border-radius: 10px;
+    object-fit: contain;
+    flex-shrink: 0;
+    filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.3));
+  }
+  #query {
+    flex: 1;
+    background: transparent;
+    border: none;
+    outline: none;
+    color: rgba(255, 255, 255, 0.92);
+    font-size: 15px;
+    font-family: inherit;
+    font-weight: 400;
+    caret-color: rgba(255, 255, 255, 0.6);
+    letter-spacing: 0.1px;
+  }
+  #query::placeholder {
+    color: rgba(255, 255, 255, 0.25);
+    font-weight: 400;
+  }
+  .hint {
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.18);
+    white-space: nowrap;
+    padding: 3px 8px;
+    border-radius: 6px;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.04);
+    flex-shrink: 0;
+  }
+  .spinner {
+    display: none;
+    width: 18px;
+    height: 18px;
+    border: 1.5px solid rgba(255, 255, 255, 0.1);
+    border-top-color: rgba(255, 255, 255, 0.5);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+    flex-shrink: 0;
+  }
+  .spinner.active { display: block; }
+  .hint.hidden { display: none; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+<div class="input-container">
+  <img class="nudge-icon" src="nudgekeycap.png" alt="Nudge" />
+  <input id="query" type="text" placeholder="Ask Nudge anything..." autofocus spellcheck="false" autocomplete="off" />
+  <span id="hint" class="hint">Enter &crarr;</span>
+  <div id="spinner" class="spinner"></div>
+</div>
+<script>
+  const { invoke } = window.__TAURI__.core;
+  const { getCurrentWindow } = window.__TAURI__.window;
+  const { emit, listen } = window.__TAURI__.event;
+
+  // Force WebView2 transparent background via JS API
+  getCurrentWindow().setBackgroundColor({ r: 0, g: 0, b: 0, a: 0 }).catch(() => {});
+
+  const container = document.querySelector('.input-container');
+  const input = document.getElementById('query');
+  const spinner = document.getElementById('spinner');
+  const hint = document.getElementById('hint');
+  let isAuthenticated = false;
+
+  // Check auth state on load and when window is focused
+  async function checkAuth() {
+    try {
+      const state = await invoke('get_auth_state');
+      isAuthenticated = state.authenticated;
+      if (!isAuthenticated) {
+        input.placeholder = 'Sign in first (open Settings)';
+      } else {
+        input.placeholder = 'Ask Nudge anything...';
+      }
+    } catch (e) {
+      console.error('auth check error:', e);
+    }
+  }
+
+  checkAuth();
+  listen('auth-success', () => checkAuth());
+
+  getCurrentWindow().listen('tauri://focus', () => {
+    // Replay open animation
+    container.style.animation = 'none';
+    container.offsetHeight; // force reflow
+    container.style.animation = '';
+
+    input.value = '';
+    input.focus();
+    checkAuth();
+  });
+
+  input.addEventListener('keydown', async (e) => {
+    if (e.key === 'Escape') {
+      getCurrentWindow().hide();
+      return;
+    }
+
+    if (e.key === 'Enter' && input.value.trim()) {
+      const query = input.value.trim();
+
+      if (!isAuthenticated) {
+        input.value = '';
+        input.placeholder = 'Sign in first (Ctrl+Shift+N → Settings)';
+        return;
+      }
+
+      spinner.classList.add('active');
+      hint.classList.add('hidden');
+      input.disabled = true;
+      let failed = false;
+
+      try {
+        await getCurrentWindow().hide();
+        await new Promise(r => setTimeout(r, 500));
+        emit('show-loading');
+        const plan = await invoke('submit_query', { query });
+        await emit('show-plan', plan);
+      } catch (err) {
+        failed = true;
+        await emit('dismiss');
+        await getCurrentWindow().show();
+        input.value = '';
+        input.placeholder = `Error: ${err}`;
+      }
+
+      spinner.classList.remove('active');
+      hint.classList.remove('hidden');
+      input.disabled = false;
+      if (!failed) {
+        input.value = '';
+        input.placeholder = 'Ask Nudge anything...';
+      }
+    }
+  });
+</script>
+</body>
+</html>
