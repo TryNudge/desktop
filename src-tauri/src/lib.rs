@@ -78,20 +78,26 @@ impl SidecarProcess {
 }
 
 fn spawn_sidecar(app: &tauri::App) -> Result<SidecarProcess, String> {
-    // In release builds, use the bundled sidecar exe
-    // In dev builds, fall back to Python
-    let exe_path = app
-        .path()
-        .resolve("binaries/sidecar", tauri::path::BaseDirectory::Resource)
-        .ok();
+    // The bundled sidecar exe sits next to the main exe
+    let current_exe = std::env::current_exe().unwrap_or_default();
+    eprintln!("[nudge] current exe: {}", current_exe.display());
+    let exe_dir = current_exe
+        .parent()
+        .unwrap_or(std::path::Path::new("."))
+        .to_path_buf();
+    eprintln!("[nudge] exe dir: {}", exe_dir.display());
 
-    // Check if bundled sidecar exists (release mode)
-    if let Some(ref path) = exe_path {
-        // Tauri appends the target triple, try both
-        let with_ext = path.with_extension("exe");
-        if with_ext.exists() {
-            eprintln!("[nudge] using bundled sidecar: {}", with_ext.display());
-            let child = Command::new(&with_ext)
+    // Tauri names it with the target triple
+    let sidecar_names = [
+        "sidecar-x86_64-pc-windows-msvc.exe",
+        "sidecar.exe",
+    ];
+
+    for name in &sidecar_names {
+        let path = exe_dir.join(name);
+        if path.exists() {
+            eprintln!("[nudge] using bundled sidecar: {}", path.display());
+            let child = Command::new(&path)
                 .stdin(Stdio::piped())
                 .stdout(Stdio::piped())
                 .stderr(Stdio::inherit())
@@ -99,6 +105,24 @@ fn spawn_sidecar(app: &tauri::App) -> Result<SidecarProcess, String> {
                 .spawn()
                 .map_err(|e| format!("failed to spawn bundled sidecar: {}", e))?;
             return Ok(SidecarProcess { child });
+        }
+    }
+
+    // Also check the resource dir (NSIS installs may put it there)
+    if let Ok(resource_dir) = app.path().resource_dir() {
+        for name in &sidecar_names {
+            let path = resource_dir.join(name);
+            if path.exists() {
+                eprintln!("[nudge] using resource sidecar: {}", path.display());
+                let child = Command::new(&path)
+                    .stdin(Stdio::piped())
+                    .stdout(Stdio::piped())
+                    .stderr(Stdio::inherit())
+                    .creation_flags(0x08000000) // CREATE_NO_WINDOW
+                    .spawn()
+                    .map_err(|e| format!("failed to spawn resource sidecar: {}", e))?;
+                return Ok(SidecarProcess { child });
+            }
         }
     }
 
