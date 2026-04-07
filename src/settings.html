@@ -424,41 +424,48 @@
 
   let recordingBtn = null;
 
+  let recordingAction = null;
+
   async function startRecording(btn) {
-    if (recordingBtn) await stopRecording(recordingBtn, null);
-    recordingBtn = btn;
+    if (recordingAction) {
+      // Cancel previous recording
+      document.querySelectorAll('.keybind-btn').forEach(b => b.classList.remove('recording'));
+      try { await invoke('resume_shortcuts'); } catch(e) {}
+    }
+    recordingAction = btn.dataset.action;
     btn.classList.add('recording');
     btn.textContent = 'Press keys...';
+    // Blur the button so keydown goes to document
+    btn.blur();
     // Pause all global shortcuts so they don't intercept our keypresses
     try { await invoke('pause_shortcuts'); } catch(e) { console.error(e); }
   }
 
-  async function stopRecording(btn, shortcut) {
-    btn.classList.remove('recording');
-    recordingBtn = null;
-    if (shortcut) {
-      btn.textContent = shortcutToDisplay(shortcut);
-    }
-    // Resume global shortcuts
-    try { await invoke('resume_shortcuts'); } catch(e) { console.error(e); }
-  }
-
   document.querySelectorAll('.keybind-btn').forEach(btn => {
-    btn.addEventListener('click', () => startRecording(btn));
+    btn.addEventListener('click', (e) => {
+      e.preventDefault();
+      startRecording(btn);
+    });
   });
 
-  document.addEventListener('keydown', async (e) => {
-    if (!recordingBtn) return;
+  window.addEventListener('keydown', async (e) => {
+    if (!recordingAction) return;
     e.preventDefault();
     e.stopPropagation();
+    e.stopImmediatePropagation();
 
     // Ignore lone modifier keys
     if (['Control', 'Shift', 'Alt', 'Meta'].includes(e.key)) return;
 
+    const action = recordingAction;
+    const btn = document.querySelector(`.keybind-btn[data-action="${action}"]`);
+
     // Escape cancels recording
     if (e.key === 'Escape') {
-      await stopRecording(recordingBtn, null);
+      recordingAction = null;
+      btn.classList.remove('recording');
       loadKeybinds();
+      try { await invoke('resume_shortcuts'); } catch(ex) {}
       return;
     }
 
@@ -475,21 +482,22 @@
     parts.push(key);
 
     const shortcut = parts.join('+');
-    const action = recordingBtn.dataset.action;
-    const btn = recordingBtn;
 
     try {
       await invoke('set_keybind', { action, shortcut });
-      await stopRecording(btn, shortcut);
+      btn.classList.remove('recording');
+      btn.textContent = shortcutToDisplay(shortcut);
+      recordingAction = null;
+      try { await invoke('resume_shortcuts'); } catch(ex) {}
       showSaved();
     } catch (err) {
       btn.textContent = String(err).slice(0, 30);
-      setTimeout(() => { loadKeybinds(); }, 1500);
       btn.classList.remove('recording');
-      recordingBtn = null;
-      try { await invoke('resume_shortcuts'); } catch(e2) {}
+      recordingAction = null;
+      setTimeout(() => loadKeybinds(), 1500);
+      try { await invoke('resume_shortcuts'); } catch(ex) {}
     }
-  });
+  }, true);
 
   async function loadKeybinds() {
     try {

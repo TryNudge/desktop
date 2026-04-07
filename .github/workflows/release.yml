@@ -39,10 +39,19 @@ jobs:
       - name: Install Tauri CLI
         run: npm install -g @tauri-apps/cli@latest
 
-      - name: Build Tauri app
+      - name: Write signing key
+        shell: bash
+        run: |
+          mkdir -p src-tauri/keys
+          echo "$TAURI_SIGNING_PRIVATE_KEY" > src-tauri/keys/nudge.key
+          echo "Signing key written ($(wc -c < src-tauri/keys/nudge.key) bytes)"
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+
+      - name: Build Tauri app
+        env:
+          TAURI_SIGNING_PRIVATE_KEY_PATH: src-tauri/keys/nudge.key
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
         run: npx tauri build
 
       - name: List build output
