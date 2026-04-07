@@ -85,7 +85,7 @@
   },
   "bundle": {
     "active": true,
-    "createUpdaterArtifacts": true,
+    "createUpdaterArtifacts": "v1Compatible",
     "targets": ["nsis"],
     "icon": [
       "icons/icon.ico",
