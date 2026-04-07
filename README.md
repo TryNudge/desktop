@@ -73,6 +73,7 @@ Create a `.env` file or set the environment variable:
 
 ```
 NUDGE_PLATFORM_URL=https://platform.nudgeapp.cc
+```
 
 > In dev mode, the app spawns the Python sidecar directly from `./venv/Scripts/python.exe`. Make sure your venv is set up at the project root.
 
