@@ -43,15 +43,55 @@ jobs:
       - name: Install Tauri CLI
         run: cargo install tauri-cli --version "^2"
 
-      - uses: tauri-apps/tauri-action@v0
+      - name: Build Tauri app
+        shell: pwsh
+        run: cargo tauri build
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
         with:
-          tauriScript: cargo tauri
-          tagName: v__VERSION__
-          releaseName: "Nudge v__VERSION__"
-          releaseBody: "Download the installer below to install Nudge."
-          releaseDraft: false
+          tag_name: ${{ github.ref_name }}
+          name: "Nudge ${{ github.ref_name }}"
+          body: "Download the installer below to install Nudge."
+          draft: false
           prerelease: false
+          files: |
+            src-tauri/target/release/bundle/nsis/*.exe
+            src-tauri/target/release/bundle/nsis/*.nsis.zip
+            src-tauri/target/release/bundle/nsis/*.nsis.zip.sig
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Generate and upload latest.json
+        shell: bash
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          SIG=$(cat src-tauri/target/release/bundle/nsis/*.nsis.zip.sig)
+          ZIP_NAME=$(ls src-tauri/target/release/bundle/nsis/*.nsis.zip | xargs -I{} basename {})
+          cat > latest.json <<EOJSON
+          {
+            "version": "$VERSION",
+            "notes": "Release v$VERSION",
+            "pub_date": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+            "platforms": {
+              "windows-x86_64": {
+                "signature": "$SIG",
+                "url": "https://github.com/TryNudge/desktop/releases/download/v$VERSION/$ZIP_NAME"
+              }
+            }
+          }
+          EOJSON
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload latest.json to release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          files: latest.json
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
