@@ -1,6 +1,13 @@
   const { invoke } = window.__TAURI__.core;
   const { getCurrentWindow } = window.__TAURI__.window;
   const { listen } = window.__TAURI__.event;
+  const { getVersion } = window.__TAURI__.app;
+
+  // Set version everywhere
+  getVersion().then(v => {
+    document.getElementById('app-version').textContent = `v${v}`;
+    document.getElementById('update-label').textContent = `v${v}`;
+  });
 
   const toggleUia = document.getElementById('toggle-uia');
   const toggleOcr = document.getElementById('toggle-ocr');
@@ -193,7 +200,7 @@
         updateDesc.textContent = info.notes || 'A new version is ready to install.';
         btnUpdate.style.display = '';
       } else {
-        updateLabel.textContent = 'v0.1.0';
+        // keep current version label
         updateDesc.textContent = 'You\u2019re on the latest version.';
       }
     } catch (e) {

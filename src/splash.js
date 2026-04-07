@@ -1,6 +1,11 @@
   const { invoke } = window.__TAURI__.core;
   const { getCurrentWindow } = window.__TAURI__.window;
   const { listen } = window.__TAURI__.event;
+  const { getVersion } = window.__TAURI__.app;
+
+  getVersion().then(v => {
+    document.getElementById('splash-version').textContent = `v${v}`;
+  });
 
   getCurrentWindow().setBackgroundColor({ r: 0, g: 0, b: 0, a: 0 }).catch(() => {});
 
