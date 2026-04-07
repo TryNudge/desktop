@@ -41,11 +41,11 @@ jobs:
         run: pip install -r requirements.txt
 
       - name: Install Tauri CLI
-        run: cargo install tauri-cli --version "^2"
+        run: npm install -g @tauri-apps/cli@latest
 
       - name: Build Tauri app
         shell: pwsh
-        run: cargo tauri build
+        run: tauri build
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
