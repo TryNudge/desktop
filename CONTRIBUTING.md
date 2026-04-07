@@ -27,6 +27,7 @@ Thanks for your interest in contributing. Here's how to get started.
 
 ## Architecture
 
+- **Rust** (`src-tauri/src/lib.rs`) — app lifecycle, auth, keybinds, sidecar orchestration
 - **Python** (`sidecar/`, `capture.py`, `brain.py`) — screen capture, UIA tree, OCR grounding
 - **HTML/CSS/JS** (`src/`) — all UI windows (splash, input, overlay, control, settings)
 
