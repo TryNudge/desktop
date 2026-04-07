@@ -28,5 +28,9 @@ src-tauri/keys/
 Thumbs.db
 desktop.ini
 
+# Build artifacts
+build/
+src-tauri/binaries/
+
 # Logs
 *.log

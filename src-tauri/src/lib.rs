@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::io::{BufRead, BufReader, Write};
-
+use std::os::windows::process::CommandExt;
 use std::process::{Child, Command, Stdio};
 use std::sync::Mutex;
 use tauri::{
@@ -77,7 +77,58 @@ impl SidecarProcess {
     }
 }
 
-fn find_project_root() -> Result<std::path::PathBuf, String> {
+fn spawn_sidecar(app: &tauri::App) -> Result<SidecarProcess, String> {
+    // In release builds, use the bundled sidecar exe
+    // In dev builds, fall back to Python
+    let exe_path = app
+        .path()
+        .resolve("binaries/sidecar", tauri::path::BaseDirectory::Resource)
+        .ok();
+
+    // Check if bundled sidecar exists (release mode)
+    if let Some(ref path) = exe_path {
+        // Tauri appends the target triple, try both
+        let with_ext = path.with_extension("exe");
+        if with_ext.exists() {
+            eprintln!("[nudge] using bundled sidecar: {}", with_ext.display());
+            let child = Command::new(&with_ext)
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::inherit())
+                .creation_flags(0x08000000) // CREATE_NO_WINDOW
+                .spawn()
+                .map_err(|e| format!("failed to spawn bundled sidecar: {}", e))?;
+            return Ok(SidecarProcess { child });
+        }
+    }
+
+    // Dev mode fallback: use Python
+    eprintln!("[nudge] bundled sidecar not found, falling back to Python");
+    let project_root = find_project_root_dev()?;
+    let sidecar_path = project_root.join("sidecar").join("server.py");
+
+    let venv_python = project_root.join("venv").join("Scripts").join("python.exe");
+    let python = if venv_python.exists() {
+        venv_python.to_string_lossy().to_string()
+    } else {
+        "python".to_string()
+    };
+
+    eprintln!("[nudge] using python: {}, script: {}", python, sidecar_path.display());
+
+    let child = Command::new(&python)
+        .arg(&sidecar_path)
+        .current_dir(&project_root)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::inherit())
+        .spawn()
+        .map_err(|e| format!("failed to spawn python sidecar: {}", e))?;
+
+    Ok(SidecarProcess { child })
+}
+
+fn find_project_root_dev() -> Result<std::path::PathBuf, String> {
     let candidates = [
         std::env::current_dir().unwrap_or_default(),
         std::env::current_dir().unwrap_or_default().join(".."),
@@ -93,45 +144,11 @@ fn find_project_root() -> Result<std::path::PathBuf, String> {
     for candidate in &candidates {
         let root = candidate.canonicalize().unwrap_or(candidate.clone());
         if root.join("sidecar").join("server.py").exists() {
-            eprintln!("[nudge] project root: {}", root.display());
             return Ok(root);
         }
     }
 
-    Err(format!(
-        "could not find project root (tried: {:?})",
-        candidates
-            .iter()
-            .map(|c| c.display().to_string())
-            .collect::<Vec<_>>()
-    ))
-}
-
-fn spawn_sidecar() -> Result<SidecarProcess, String> {
-    let project_root = find_project_root()?;
-    let sidecar_path = project_root.join("sidecar").join("server.py");
-
-    let venv_python = project_root.join("venv").join("Scripts").join("python.exe");
-    let python = if venv_python.exists() {
-        eprintln!("[nudge] using venv python: {}", venv_python.display());
-        venv_python.to_string_lossy().to_string()
-    } else {
-        eprintln!("[nudge] using system python");
-        "python".to_string()
-    };
-
-    eprintln!("[nudge] sidecar script: {}", sidecar_path.display());
-
-    let child = Command::new(&python)
-        .arg(&sidecar_path)
-        .current_dir(&project_root)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::inherit())
-        .spawn()
-        .map_err(|e| format!("failed to spawn sidecar ({}): {}", python, e))?;
-
-    Ok(SidecarProcess { child })
+    Err("could not find project root for dev mode".to_string())
 }
 
 // ── Data types ─────────────────────────────────────────────────────────────
@@ -944,7 +961,7 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
             // Spawn Python sidecar
-            let sidecar = match spawn_sidecar() {
+            let sidecar = match spawn_sidecar(app) {
                 Ok(s) => {
                     eprintln!("[nudge] sidecar started");
                     Some(s)

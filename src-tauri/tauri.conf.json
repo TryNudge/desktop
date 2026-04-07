@@ -87,6 +87,7 @@
     "active": true,
     "createUpdaterArtifacts": "v1Compatible",
     "targets": ["nsis"],
+    "externalBin": ["binaries/sidecar"],
     "icon": [
       "icons/icon.ico",
       "icons/icon.png"
