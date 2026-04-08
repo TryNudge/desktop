@@ -12,9 +12,15 @@
   <div class="slide active" data-slide="0">
     <img class="logo" src="nudgekeycap.png" alt="Nudge" />
     <h2>Nudge</h2>
-    <p>AI-powered desktop navigation.<br>Sign in to get started.</p>
-    <div class="signin-actions">
-      <button class="btn-signin" id="btn-signin">Sign In</button>
+    <div id="signin-default">
+      <p>AI-powered desktop navigation.<br>Sign in to get started.</p>
+      <div class="signin-actions">
+        <button class="btn-signin" id="btn-signin">Sign In</button>
+      </div>
+    </div>
+    <div id="signin-waiting" style="display:none">
+      <p>Opened in your browser.<br>Complete sign in to continue.</p>
+      <a id="signin-link" href="#" class="signin-manual-link">Open manually</a>
     </div>
   </div>
 
@@ -25,6 +31,7 @@
     <p>Let's walk through how it works. It only takes a moment.</p>
     <div class="step-indicator">
       <div class="step-dot active"></div>
+      <div class="step-dot"></div>
       <div class="step-dot"></div>
       <div class="step-dot"></div>
     </div>
@@ -44,6 +51,7 @@
       <div class="step-dot active"></div>
       <div class="step-dot"></div>
       <div class="step-dot"></div>
+      <div class="step-dot"></div>
     </div>
   </div>
 
@@ -56,15 +64,11 @@
       <span class="mock-text">How do I merge cells in Excel?</span>
       <div class="mock-cursor"></div>
     </div>
-    <div class="typing-examples">
-      <span class="example-chip">Save as PDF</span>
-      <span class="example-chip">Find and replace</span>
-      <span class="example-chip">Add a border</span>
-      <span class="example-chip">Change font size</span>
-    </div>
+    <p class="mock-hint">Hover the logo to enable Research mode</p>
     <div class="step-indicator">
       <div class="step-dot"></div>
       <div class="step-dot active"></div>
+      <div class="step-dot"></div>
       <div class="step-dot"></div>
     </div>
   </div>
@@ -84,6 +88,35 @@
       </div>
     </div>
     <div class="step-indicator">
+      <div class="step-dot"></div>
+      <div class="step-dot"></div>
+      <div class="step-dot active"></div>
+      <div class="step-dot"></div>
+    </div>
+  </div>
+
+  <!-- Slide 5: System tray -->
+  <div class="slide" data-slide="5">
+    <div class="tray-graphic">
+      <div class="tray-bar">
+        <div class="tray-dots">
+          <span class="tray-dot"></span>
+          <span class="tray-dot"></span>
+          <span class="tray-dot nudge-dot">
+            <img src="nudgekeycap.png" alt="" class="tray-icon-img" />
+          </span>
+          <span class="tray-dot"></span>
+        </div>
+        <div class="tray-menu">
+          <div class="tray-menu-item">Settings</div>
+          <div class="tray-menu-item tray-menu-quit">Quit</div>
+        </div>
+      </div>
+    </div>
+    <h2>Find Nudge in Your Tray</h2>
+    <p>Nudge runs quietly in the system tray.<br>Right-click the icon to open settings or quit.</p>
+    <div class="step-indicator">
+      <div class="step-dot"></div>
       <div class="step-dot"></div>
       <div class="step-dot"></div>
       <div class="step-dot active"></div>

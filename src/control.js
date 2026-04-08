@@ -96,6 +96,7 @@
 
   function dismiss() {
     emit('dismiss', {});
+    emit('dismiss-answer', {});
     stepCount = 0;
     getCurrentWindow().hide();
   }

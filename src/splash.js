@@ -13,7 +13,7 @@
   const btnBack = document.getElementById('btn-back');
   const btnNext = document.getElementById('btn-next');
   let currentSlide = 0;
-  const LAST_SLIDE = 4;
+  const LAST_SLIDE = 5;
 
   function goTo(index) {
     currentSlide = index;
@@ -56,8 +56,15 @@
   });
 
   // Sign-in actions
-  document.getElementById('btn-signin').addEventListener('click', () => {
-    invoke('login').catch(console.error);
+  document.getElementById('btn-signin').addEventListener('click', async () => {
+    try {
+      const url = await invoke('login');
+      document.getElementById('signin-default').style.display = 'none';
+      document.getElementById('signin-waiting').style.display = '';
+      document.getElementById('signin-link').href = url;
+    } catch (e) {
+      console.error(e);
+    }
   });
 
   // Auth success: jump to welcome slide

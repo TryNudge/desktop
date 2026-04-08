@@ -8,7 +8,13 @@
   const input = document.getElementById('query');
   const spinner = document.getElementById('spinner');
   const hint = document.getElementById('hint');
+  const researchToggle = document.getElementById('research-toggle');
   let isAuthenticated = false;
+  let researchMode = false;
+
+  researchToggle.addEventListener('change', () => {
+    researchMode = researchToggle.checked;
+  });
 
   // Check auth state on load and when window is focused
   async function checkAuth() {
@@ -58,8 +64,31 @@
         await getCurrentWindow().hide();
         await new Promise(r => setTimeout(r, 500));
         emit('show-loading');
-        const plan = await invoke('submit_query', { query });
-        await emit('show-plan', plan);
+        const response = await invoke('submit_query', { query, researchMode });
+
+        console.log('[input] response_type:', response.response_type);
+
+        if (response.response_type === 'answer') {
+          // Rust already showed the answer window and emitted events
+        } else if (response.response_type === 'hybrid') {
+          // Rust already showed the answer window; we just need to show the overlay steps
+          await emit('show-plan', {
+            app_context: response.app_context,
+            steps: response.steps || [],
+            scale_factor: response.scale_factor,
+            monitor_offset_x: response.monitor_offset_x,
+            monitor_offset_y: response.monitor_offset_y,
+          });
+        } else {
+          // Steps only — existing overlay flow
+          await emit('show-plan', {
+            app_context: response.app_context,
+            steps: response.steps || [],
+            scale_factor: response.scale_factor,
+            monitor_offset_x: response.monitor_offset_x,
+            monitor_offset_y: response.monitor_offset_y,
+          });
+        }
       } catch (err) {
         failed = true;
         await emit('dismiss');

@@ -235,3 +235,11 @@
     captionEl.classList.remove('visible'); loadingEl.classList.remove('active');
     getCurrentWindow().hide();
   });
+
+  // When an answer-only response arrives, dismiss overlay loading state
+  listen('show-answer', () => {
+    loadingEl.classList.remove('active');
+    if (!plan) {
+      getCurrentWindow().hide();
+    }
+  });

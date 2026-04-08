@@ -23,6 +23,9 @@ const PLATFORM_URL: &str = match option_env!("NUDGE_PLATFORM_URL") {
 struct AuthToken(Mutex<Option<String>>);
 struct ActiveQuery(Mutex<Option<String>>);
 struct CompletedSteps(Mutex<Vec<String>>);
+struct ResearchMode(Mutex<bool>);
+struct SessionId(Mutex<Option<String>>);
+struct PendingAnswer(Mutex<Option<AnswerPayload>>);
 
 // ── Keybinds ───────────────────────────────────────────────────────────────
 
@@ -214,6 +217,33 @@ struct StepPlan {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
+struct AnswerPayload {
+    title: String,
+    content: String,
+    copyable_text: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+struct NudgeResponse {
+    response_type: String,
+    app_context: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    answer: Option<AnswerPayload>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    steps: Option<Vec<Step>>,
+    #[serde(default)]
+    session_id: String,
+    #[serde(default = "default_scale")]
+    scale_factor: f64,
+    #[serde(default)]
+    monitor_offset_x: i32,
+    #[serde(default)]
+    monitor_offset_y: i32,
+}
+
+fn default_scale() -> f64 { 1.0 }
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
 struct AuthState {
     authenticated: bool,
     email: Option<String>,
@@ -223,11 +253,11 @@ struct AuthState {
 // ── Auth commands ──────────────────────────────────────────────────────────
 
 #[tauri::command]
-async fn login() -> Result<(), String> {
+async fn login() -> Result<String, String> {
     let url = format!("{}/auth/desktop-login", PLATFORM_URL);
     eprintln!("[nudge] opening browser for login: {}", url);
     open::that(&url).map_err(|e| format!("failed to open browser: {}", e))?;
-    Ok(())
+    Ok(url)
 }
 
 #[tauri::command]
@@ -260,7 +290,10 @@ async fn logout(app_handle: AppHandle, token_state: State<'_, AuthToken>) -> Res
         let _ = store.save();
     }
 
-    // Show splash screen
+    // Hide settings, show splash
+    if let Some(settings) = app_handle.get_webview_window("settings") {
+        let _ = settings.hide();
+    }
     if let Some(splash) = app_handle.get_webview_window("splash") {
         let _ = splash.center();
         let _ = splash.show();
@@ -543,20 +576,27 @@ async fn install_update(app_handle: AppHandle) -> Result<(), String> {
 
 #[tauri::command]
 async fn submit_query(
+    app: AppHandle,
     query: String,
+    research_mode: Option<bool>,
     token_state: State<'_, AuthToken>,
     active_query: State<'_, ActiveQuery>,
     completed_steps: State<'_, CompletedSteps>,
+    research_state: State<'_, ResearchMode>,
+    session_state: State<'_, SessionId>,
     sidecar: State<'_, Sidecar>,
-) -> Result<StepPlan, String> {
-    eprintln!("[nudge] submit_query called: {:?}", query);
+) -> Result<NudgeResponse, String> {
+    let research = research_mode.unwrap_or(false);
+    eprintln!("[nudge] submit_query called: {:?} (research={})", query, research);
 
-    // Store query and reset completed steps
+    // Store query, reset completed steps, store research mode
     {
         let mut q = active_query.0.lock().map_err(|e| e.to_string())?;
         *q = Some(query.clone());
         let mut s = completed_steps.0.lock().map_err(|e| e.to_string())?;
         s.clear();
+        let mut r = research_state.0.lock().map_err(|e| e.to_string())?;
+        *r = research;
     }
 
     let token = {
@@ -564,16 +604,115 @@ async fn submit_query(
         guard.clone().ok_or("Not signed in. Please sign in first.")?
     };
 
-    // Step 1: Capture screenshot + UIA data locally
     let capture = capture_only(&sidecar)?;
+    let backend_resp = call_backend_query(&token, &query, &capture, research).await?;
 
-    // Step 2: Send to backend API
-    let plan = call_backend_query(&token, &query, &capture).await?;
+    // Parse the response to determine type
+    let response_type = backend_resp
+        .get("response_type")
+        .and_then(|v| v.as_str())
+        .unwrap_or("steps")
+        .to_string();
 
-    // Step 3: Ground the plan locally using sidecar
-    let grounded = ground_plan_sidecar(&sidecar, &plan, &capture)?;
+    // Store session ID
+    if let Some(sid) = backend_resp.get("session_id").and_then(|v| v.as_str()) {
+        let mut s = session_state.0.lock().map_err(|e| e.to_string())?;
+        *s = Some(sid.to_string());
+    }
 
-    Ok(grounded)
+    let session_id = backend_resp
+        .get("session_id")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let scale_factor = backend_resp
+        .get("scale_factor")
+        .and_then(|v| v.as_f64())
+        .unwrap_or(1.0);
+    let monitor_offset_x = backend_resp
+        .get("monitor_offset_x")
+        .and_then(|v| v.as_i64())
+        .unwrap_or(0) as i32;
+    let monitor_offset_y = backend_resp
+        .get("monitor_offset_y")
+        .and_then(|v| v.as_i64())
+        .unwrap_or(0) as i32;
+
+    // Parse answer payload if present
+    let answer: Option<AnswerPayload> = backend_resp
+        .get("answer")
+        .and_then(|v| serde_json::from_value(v.clone()).ok());
+
+    // Parse and ground steps if present
+    let steps: Option<Vec<Step>> = if response_type == "steps" || response_type == "hybrid" {
+        // Build a StepPlan for grounding
+        let steps_val = backend_resp.get("steps").cloned().unwrap_or(serde_json::json!([]));
+        let app_context = backend_resp
+            .get("app_context")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+
+        let step_plan_json = serde_json::json!({
+            "app_context": app_context,
+            "steps": steps_val,
+            "scale_factor": scale_factor,
+            "monitor_offset_x": monitor_offset_x,
+            "monitor_offset_y": monitor_offset_y,
+        });
+
+        let grounded = ground_plan_sidecar(&sidecar, &step_plan_json, &capture)?;
+        Some(grounded.steps)
+    } else {
+        None
+    };
+
+    let result = NudgeResponse {
+        response_type: response_type.clone(),
+        app_context: backend_resp
+            .get("app_context")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string(),
+        answer,
+        steps,
+        session_id,
+        scale_factor,
+        monitor_offset_x,
+        monitor_offset_y,
+    };
+
+    eprintln!("[nudge] submit_query returning response_type={}, has_answer={}, has_steps={}",
+        result.response_type,
+        result.answer.is_some(),
+        result.steps.is_some()
+    );
+
+    // For answer/hybrid responses, store answer in state and show the window
+    if result.response_type == "answer" || result.response_type == "hybrid" {
+        // Dismiss the overlay loading
+        let _ = app.emit("dismiss", serde_json::Value::Null);
+
+        // Store the answer so the window can pull it via get_pending_answer
+        if let Some(ref answer_payload) = result.answer {
+            if let Some(state) = app.try_state::<PendingAnswer>() {
+                if let Ok(mut guard) = state.0.lock() {
+                    *guard = Some(answer_payload.clone());
+                }
+            }
+        }
+
+        if let Some(answer_win) = app.get_webview_window("answer") {
+            let _ = answer_win.center();
+            let _ = answer_win.show();
+            let _ = answer_win.set_focus();
+            eprintln!("[nudge] answer window shown from Rust");
+        } else {
+            eprintln!("[nudge] ERROR: could not find answer window");
+        }
+    }
+
+    Ok(result)
 }
 
 #[tauri::command]
@@ -582,6 +721,7 @@ async fn next_step(
     token_state: State<'_, AuthToken>,
     active_query: State<'_, ActiveQuery>,
     completed_steps_state: State<'_, CompletedSteps>,
+    research_state: State<'_, ResearchMode>,
     sidecar: State<'_, Sidecar>,
 ) -> Result<StepPlan, String> {
     eprintln!(
@@ -589,12 +729,12 @@ async fn next_step(
         completed_instruction
     );
 
-    // Track completed step
-    let (original_query, steps_so_far) = {
+    let (original_query, steps_so_far, research) = {
         let mut steps = completed_steps_state.0.lock().map_err(|e| e.to_string())?;
         steps.push(completed_instruction.clone());
         let q = active_query.0.lock().map_err(|e| e.to_string())?;
-        (q.clone().unwrap_or_default(), steps.clone())
+        let r = research_state.0.lock().map_err(|e| e.to_string())?;
+        (q.clone().unwrap_or_default(), steps.clone(), *r)
     };
 
     let token = {
@@ -604,10 +744,112 @@ async fn next_step(
 
     let capture = capture_only(&sidecar)?;
     let plan =
-        call_backend_next_step(&token, &original_query, &steps_so_far, &capture).await?;
+        call_backend_next_step(&token, &original_query, &steps_so_far, &capture, research).await?;
     let grounded = ground_plan_sidecar(&sidecar, &plan, &capture)?;
 
     Ok(grounded)
+}
+
+#[tauri::command]
+async fn submit_followup(
+    query: String,
+    token_state: State<'_, AuthToken>,
+    session_state: State<'_, SessionId>,
+    research_state: State<'_, ResearchMode>,
+    sidecar: State<'_, Sidecar>,
+) -> Result<NudgeResponse, String> {
+    eprintln!("[nudge] submit_followup called: {:?}", query);
+
+    let token = {
+        let guard = token_state.0.lock().map_err(|e| e.to_string())?;
+        guard.clone().ok_or("Not signed in. Please sign in first.")?
+    };
+
+    let session_id = {
+        let guard = session_state.0.lock().map_err(|e| e.to_string())?;
+        guard.clone().ok_or("No active session")?
+    };
+
+    let research = {
+        let r = research_state.0.lock().map_err(|e| e.to_string())?;
+        *r
+    };
+
+    let capture = capture_only(&sidecar)?;
+    let backend_resp =
+        call_backend_followup(&token, &session_id, &query, &capture, research).await?;
+
+    let response_type = backend_resp
+        .get("response_type")
+        .and_then(|v| v.as_str())
+        .unwrap_or("answer")
+        .to_string();
+
+    let scale_factor = backend_resp
+        .get("scale_factor")
+        .and_then(|v| v.as_f64())
+        .unwrap_or(1.0);
+    let monitor_offset_x = backend_resp
+        .get("monitor_offset_x")
+        .and_then(|v| v.as_i64())
+        .unwrap_or(0) as i32;
+    let monitor_offset_y = backend_resp
+        .get("monitor_offset_y")
+        .and_then(|v| v.as_i64())
+        .unwrap_or(0) as i32;
+
+    let answer: Option<AnswerPayload> = backend_resp
+        .get("answer")
+        .and_then(|v| serde_json::from_value(v.clone()).ok());
+
+    let steps: Option<Vec<Step>> = if response_type == "steps" || response_type == "hybrid" {
+        let steps_val = backend_resp.get("steps").cloned().unwrap_or(serde_json::json!([]));
+        let app_context = backend_resp
+            .get("app_context")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+
+        let step_plan_json = serde_json::json!({
+            "app_context": app_context,
+            "steps": steps_val,
+            "scale_factor": scale_factor,
+            "monitor_offset_x": monitor_offset_x,
+            "monitor_offset_y": monitor_offset_y,
+        });
+
+        let grounded = ground_plan_sidecar(&sidecar, &step_plan_json, &capture)?;
+        Some(grounded.steps)
+    } else {
+        None
+    };
+
+    Ok(NudgeResponse {
+        response_type,
+        app_context: backend_resp
+            .get("app_context")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string(),
+        answer,
+        steps,
+        session_id: backend_resp
+            .get("session_id")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string(),
+        scale_factor,
+        monitor_offset_x,
+        monitor_offset_y,
+    })
+}
+
+#[tauri::command]
+async fn get_pending_answer(
+    pending: State<'_, PendingAnswer>,
+) -> Result<Option<AnswerPayload>, String> {
+    let guard = pending.0.lock().map_err(|e| e.to_string())?;
+    Ok(guard.clone())
 }
 
 // ── Local mode fallback (Ollama, no auth needed) ───────────────────────────
@@ -663,6 +905,7 @@ async fn call_backend_query(
     token: &str,
     query: &str,
     capture: &serde_json::Value,
+    research_mode: bool,
 ) -> Result<serde_json::Value, String> {
     let url = format!("{}/api/v1/query", PLATFORM_URL);
     let client = reqwest::Client::new();
@@ -680,6 +923,7 @@ async fn call_backend_query(
 
     let form = reqwest::multipart::Form::new()
         .text("query", query.to_string())
+        .text("research_mode", research_mode.to_string())
         .part(
             "screenshot",
             reqwest::multipart::Part::bytes(screenshot_bytes)
@@ -756,6 +1000,7 @@ async fn call_backend_next_step(
     original_query: &str,
     completed_steps: &[String],
     capture: &serde_json::Value,
+    research_mode: bool,
 ) -> Result<serde_json::Value, String> {
     let url = format!("{}/api/v1/next-step", PLATFORM_URL);
     let client = reqwest::Client::new();
@@ -772,10 +1017,106 @@ async fn call_backend_next_step(
 
     let form = reqwest::multipart::Form::new()
         .text("original_query", original_query.to_string())
+        .text("research_mode", research_mode.to_string())
         .text(
             "completed_steps",
             serde_json::to_string(completed_steps).unwrap_or_else(|_| "[]".to_string()),
         )
+        .part(
+            "screenshot",
+            reqwest::multipart::Part::bytes(screenshot_bytes)
+                .file_name("screenshot.png")
+                .mime_str("image/png")
+                .map_err(|e| e.to_string())?,
+        )
+        .text(
+            "screenshot_dimensions",
+            capture
+                .get("screenshot_dimensions")
+                .map(|v| v.to_string())
+                .unwrap_or_else(|| "{}".to_string()),
+        )
+        .text(
+            "original_dimensions",
+            capture
+                .get("original_dimensions")
+                .map(|v| v.to_string())
+                .unwrap_or_else(|| "{}".to_string()),
+        )
+        .text(
+            "scale_factor",
+            capture
+                .get("scale_factor")
+                .and_then(|v| v.as_f64())
+                .map(|v| v.to_string())
+                .unwrap_or_else(|| "1".to_string()),
+        )
+        .text(
+            "monitor_offset",
+            capture
+                .get("monitor_offset")
+                .map(|v| v.to_string())
+                .unwrap_or_else(|| r#"{"x":0,"y":0}"#.to_string()),
+        )
+        .text(
+            "uia_tree",
+            capture
+                .get("uia_tree")
+                .map(|v| v.to_string())
+                .unwrap_or_else(|| "null".to_string()),
+        )
+        .text(
+            "foreground_window",
+            capture
+                .get("foreground_window")
+                .map(|v| v.to_string())
+                .unwrap_or_else(|| "null".to_string()),
+        );
+
+    let response = client
+        .post(&url)
+        .header("Authorization", format!("Bearer {}", token))
+        .multipart(form)
+        .send()
+        .await
+        .map_err(|e| format!("network error: {}", e))?;
+
+    if !response.status().is_success() {
+        let status = response.status();
+        let body = response.text().await.unwrap_or_default();
+        return Err(format!("Backend error ({}): {}", status, body));
+    }
+
+    response
+        .json()
+        .await
+        .map_err(|e| format!("parse backend response: {}", e))
+}
+
+async fn call_backend_followup(
+    token: &str,
+    session_id: &str,
+    query: &str,
+    capture: &serde_json::Value,
+    research_mode: bool,
+) -> Result<serde_json::Value, String> {
+    let url = format!("{}/api/v1/followup", PLATFORM_URL);
+    let client = reqwest::Client::new();
+
+    let screenshot_b64 = capture
+        .get("screenshot_b64")
+        .and_then(|v| v.as_str())
+        .ok_or("no screenshot_b64 in capture")?;
+
+    use base64::Engine;
+    let screenshot_bytes = base64::engine::general_purpose::STANDARD
+        .decode(screenshot_b64)
+        .map_err(|e| format!("base64 decode: {}", e))?;
+
+    let form = reqwest::multipart::Form::new()
+        .text("session_id", session_id.to_string())
+        .text("query", query.to_string())
+        .text("research_mode", research_mode.to_string())
         .part(
             "screenshot",
             reqwest::multipart::Part::bytes(screenshot_bytes)
@@ -894,6 +1235,12 @@ fn setup_windows(app: &AppHandle) {
         apply_rounded_corners(&settings, 16);
     }
 
+    // Answer popup: interactive (NOT click-through), rounded corners
+    if let Some(answer) = app.get_webview_window("answer") {
+        let _ = answer.set_shadow(false);
+        apply_rounded_corners(&answer, 16);
+    }
+
     // Splash: rounded corners
     if let Some(splash) = app.get_webview_window("splash") {
         let _ = splash.set_shadow(false);
@@ -1001,6 +1348,9 @@ pub fn run() {
             app.manage(AuthToken(Mutex::new(None)));
             app.manage(ActiveQuery(Mutex::new(None)));
             app.manage(CompletedSteps(Mutex::new(Vec::new())));
+            app.manage(ResearchMode(Mutex::new(false)));
+            app.manage(SessionId(Mutex::new(None)));
+            app.manage(PendingAnswer(Mutex::new(None)));
 
             // Try to load saved token from store
             match app.store("auth.json") {
@@ -1132,6 +1482,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             submit_query,
             next_step,
+            submit_followup,
+            get_pending_answer,
             login,
             logout,
             get_auth_state,

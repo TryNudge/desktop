@@ -68,6 +68,23 @@
         "backgroundColor": "#00000000"
       },
       {
+        "label": "answer",
+        "title": "Nudge Answer",
+        "width": 480,
+        "height": 420,
+        "minWidth": 360,
+        "minHeight": 280,
+        "resizable": true,
+        "decorations": false,
+        "transparent": true,
+        "alwaysOnTop": true,
+        "visible": false,
+        "skipTaskbar": true,
+        "center": true,
+        "url": "answer.html",
+        "backgroundColor": "#00000000"
+      },
+      {
         "label": "settings",
         "title": "Nudge Settings",
         "width": 480,

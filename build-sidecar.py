@@ -9,6 +9,22 @@ ROOT = Path(__file__).parent
 DIST = ROOT / "src-tauri" / "binaries"
 
 def main():
+    # Packages that are installed but NOT used by the sidecar.
+    # Without explicit exclusion PyInstaller pulls them in transitively
+    # (e.g. torch+CUDA adds ~2 GB).
+    EXCLUDES = [
+        "torch", "torchaudio", "torchvision",
+        "tensorflow", "keras",
+        "scipy", "sympy",
+        "matplotlib", "pandas",
+        "IPython", "notebook", "jupyter",
+        "triton",
+    ]
+
+    exclude_args = []
+    for mod in EXCLUDES:
+        exclude_args += ["--exclude-module", mod]
+
     # Build with PyInstaller
     subprocess.run([
         sys.executable, "-m", "PyInstaller",
@@ -26,6 +42,7 @@ def main():
         "--hidden-import", "mss",
         "--hidden-import", "numpy",
         "--hidden-import", "PIL",
+        *exclude_args,
         "--clean",
         str(ROOT / "sidecar" / "server.py"),
     ], check=True)

@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="answer.css">
+</head>
+<body>
+<div class="answer-window">
+  <div class="titlebar">
+    <div class="titlebar-left">
+      <img class="nudge-icon" src="nudgekeycap.png" alt="Nudge" />
+      <span id="answer-title" class="title-text">Answer</span>
+    </div>
+    <div class="titlebar-right">
+      <button id="btn-steps" class="btn-steps" style="display:none">Show Steps</button>
+      <button id="btn-copy" class="btn-copy">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/>
+        </svg>
+        <span id="copy-label">Copy</span>
+      </button>
+      <button id="btn-close" class="btn-close">&times;</button>
+    </div>
+  </div>
+  <div id="answer-content" class="answer-content"></div>
+  <div class="followup-bar">
+    <input id="followup-input" type="text" placeholder="Ask a follow-up..." spellcheck="false" autocomplete="off" />
+    <span id="followup-hint" class="hint">Enter &crarr;</span>
+    <div id="followup-spinner" class="spinner"></div>
+  </div>
+</div>
+
+<script src="answer.js"></script>
+</body>
+</html>
