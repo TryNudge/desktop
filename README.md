@@ -42,12 +42,12 @@ Nudge captures your screen, sends it to a vision language model, and returns ste
 | Layer | Technology |
 |-------|-----------|
 | Desktop Framework | Tauri 2 (Rust) |
-| Frontend | Vanilla HTML / CSS / JS |
+| Frontend | React 19 + TypeScript + Tailwind CSS 4 + Vite |
 | Screen Capture | Python (mss + Pillow + pywinauto) |
 | Text Detection | RapidOCR (ONNX Runtime) |
 | AI Inference | Nudge Backend processes data |
 
-## Prerequisites to build
+## Prerequisites
 
 - [Rust](https://rustup.rs/) (stable)
 - [Node.js](https://nodejs.org/) 20+
@@ -83,7 +83,7 @@ NUDGE_PLATFORM_URL=https://platform.nudge.help
 npm run tauri dev
 ```
 
-This starts the Tauri dev server with hot-reload for the frontend and the Rust backend. The Python sidecar is spawned automatically from your local venv.
+This starts Vite (React + Tailwind) with HMR on port 1420 alongside the Rust backend. The Python sidecar is spawned automatically from your local venv.
 
 ## Building
 
@@ -103,27 +103,38 @@ This outputs `src-tauri/binaries/sidecar-x86_64-pc-windows-msvc.exe`.
 npm run tauri build
 ```
 
-Produces an NSIS installer, portable zip, and update signature in `src-tauri/target/release/bundle/`.
+Vite builds the React frontend to `dist/`, then Tauri bundles everything into an NSIS installer, portable zip, and update signature in `src-tauri/target/release/bundle/`.
 
 ## Project Structure
 
 ```
 NudgeDesktop/
-├── src/                  # Frontend (HTML/CSS/JS windows)
-│   ├── splash.*          # Onboarding + login
-│   ├── input.*           # Query input bar
-│   ├── overlay.*         # Visual step overlay
-│   ├── control.*         # Step navigation
-│   └── settings.*        # Configuration
-├── src-tauri/            # Rust backend
-│   ├── src/lib.rs        # Tauri commands, auth, sidecar orchestration
-│   ├── tauri.conf.json   # App config + window definitions
-│   └── binaries/         # Compiled sidecar exe
-├── sidecar/server.py     # JSON-RPC bridge (stdin/stdout)
-├── capture.py            # Screen capture, UIA tree, OCR, grounding
-├── brain.py              # Step plan data structures
-├── build-sidecar.py      # PyInstaller build script
-└── requirements.txt      # Python dependencies
+├── app/                      # Frontend (React + TypeScript)
+│   ├── windows/              # One folder per Tauri window
+│   │   ├── splash/           # Onboarding + login
+│   │   ├── input/            # Query input bar
+│   │   ├── overlay/          # Visual step overlay + canvas animation
+│   │   ├── control/          # Step navigation bar
+│   │   ├── answer/           # Markdown answer + follow-ups
+│   │   └── settings/         # Configuration panel
+│   ├── lib/                  # Shared code
+│   │   ├── types.ts          # TypeScript types (mirrors Rust structs)
+│   │   ├── tauri.ts          # Typed invoke wrappers for all commands
+│   │   └── hooks.ts          # React hooks (useTauriEvent, useAuth, etc.)
+│   └── main.css              # Tailwind entry + shared animations
+├── pages/                    # HTML entry points (one per window)
+├── public/                   # Static assets (icons, cursors)
+├── src-tauri/                # Rust backend
+│   ├── src/lib.rs            # Tauri commands, auth, sidecar orchestration
+│   ├── tauri.conf.json       # App config + window definitions
+│   └── binaries/             # Compiled sidecar exe
+├── sidecar/server.py         # JSON-RPC bridge (stdin/stdout)
+├── capture.py                # Screen capture, UIA tree, OCR, grounding
+├── brain.py                  # Step plan data structures
+├── build-sidecar.py          # PyInstaller build script
+├── vite.config.ts            # Vite + React + Tailwind config
+├── package.json              # Node dependencies
+└── requirements.txt          # Python dependencies
 ```
 
 ## License

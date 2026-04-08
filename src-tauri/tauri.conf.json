@@ -4,12 +4,13 @@
   "version": "0.2.2",
   "identifier": "com.nudge.app",
   "build": {
-    "frontendDist": "../src",
-    "beforeDevCommand": "",
-    "beforeBuildCommand": ""
+    "devUrl": "http://localhost:1420",
+    "frontendDist": "../dist",
+    "beforeDevCommand": "npm run dev",
+    "beforeBuildCommand": "npm run build"
   },
   "app": {
-    "withGlobalTauri": true,
+    "withGlobalTauri": false,
     "windows": [
       {
         "label": "splash",
@@ -21,7 +22,7 @@
         "transparent": true,
         "visible": false,
         "center": true,
-        "url": "splash.html",
+        "url": "pages/splash.html",
         "backgroundColor": "#00000000"
       },
       {
@@ -36,7 +37,7 @@
         "visible": false,
         "skipTaskbar": true,
         "center": true,
-        "url": "input.html",
+        "url": "pages/input.html",
         "backgroundColor": "#00000000"
       },
       {
@@ -50,7 +51,7 @@
         "visible": false,
         "fullscreen": false,
         "focus": false,
-        "url": "overlay.html",
+        "url": "pages/overlay.html",
         "backgroundColor": "#00000000"
       },
       {
@@ -64,7 +65,7 @@
         "alwaysOnTop": true,
         "visible": false,
         "skipTaskbar": true,
-        "url": "control.html",
+        "url": "pages/control.html",
         "backgroundColor": "#00000000"
       },
       {
@@ -81,7 +82,7 @@
         "visible": false,
         "skipTaskbar": true,
         "center": true,
-        "url": "answer.html",
+        "url": "pages/answer.html",
         "backgroundColor": "#00000000"
       },
       {
@@ -93,7 +94,7 @@
         "decorations": false,
         "visible": false,
         "center": true,
-        "url": "settings.html"
+        "url": "pages/settings.html"
       }
     ],
     "security": {

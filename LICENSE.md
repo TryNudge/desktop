@@ -1,25 +1,21 @@
-# Business Source License 1.1
+MIT License
 
-**Licensor:** Nudge
+Copyright (c) 2025 Nudge
 
-**Licensed Work:** Nudge Desktop
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
 
-**Change Date:** April 8, 2030
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
 
-**Change License:** MIT
-
-## Terms
-
-The Licensor hereby grants you the right to copy, modify, create derivative works, redistribute, and make non-production use of the Licensed Work.
-
-**Additional Use Grant:** You may use the Licensed Work for any purpose, including production use, _except_ you may not use the Licensed Work to offer a commercial product or service that competes with the Licensed Work or any product or service provided by the Licensor.
-
-For purposes of this license, "compete" means offering a substantially similar desktop navigation assistant, AI-powered screen guidance tool, or step-by-step UI automation product.
-
-**Change Date:** On the Change Date above, the Licensed Work will be made available under the Change License (MIT), and this Business Source License will no longer apply.
-
-## Notice
-
-The Business Source License (this document, or the "License") is not an Open Source license. However, the Licensed Work will eventually be made available under an Open Source License, as stated in this License.
-
-For more information on the use of the Business Source License, please visit [MariaDB BSL FAQ](https://mariadb.com/bsl-faq-adopting/).
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.

@@ -43,12 +43,12 @@ jobs:
       - name: Build sidecar exe
         run: python build-sidecar.py
 
-      - name: Install Tauri CLI
-        run: npm install -g @tauri-apps/cli@latest
+      - name: Install frontend dependencies
+        run: npm ci
 
       - name: Build Tauri app
         shell: pwsh
-        run: tauri build
+        run: npx tauri build
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}

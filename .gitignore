@@ -8,6 +8,10 @@ __pycache__/
 venv/
 .venv/
 
+# Node / Vite
+node_modules/
+dist/
+
 # Updater signing keys
 src-tauri/keys/
 

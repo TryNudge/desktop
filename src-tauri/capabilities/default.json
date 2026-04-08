@@ -2,7 +2,7 @@
   "$schema": "https://raw.githubusercontent.com/nicegui-org/nicegui/main/nicegui/native/tauri_config/schema/desktop-schema.json",
   "identifier": "default",
   "description": "Default capabilities for Nudge",
-  "windows": ["splash", "input", "overlay", "control", "settings"],
+  "windows": ["splash", "input", "overlay", "control", "settings", "answer"],
   "permissions": [
     "core:default",
     "core:app:default",
