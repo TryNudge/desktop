@@ -97,7 +97,7 @@ export default function ChatsPage({
   return <ChatView chat={selectedChat} onBack={() => onSelectChat(null)} onSend={(msg) => onSendMessage(selectedChat.id, msg)} />
 }
 
-function ChatView({ chat, onBack, onSend }: { chat: Chat; onBack: () => void; onSend: (msg: string) => void }) {
+function ChatView({ chat, onSend }: { chat: Chat; onBack: () => void; onSend: (msg: string) => void }) {
   const [message, setMessage] = useState('')
   const endRef = useRef<HTMLDivElement>(null)
 

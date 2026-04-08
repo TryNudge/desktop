@@ -157,8 +157,8 @@ export default function AgentForm({
                       key={w.hwnd}
                       className="inline-flex items-center gap-1 px-2 py-[2px] bg-white/[0.05] border border-white/[0.06] rounded-md text-[11px] text-white/50"
                     >
-                      {entry?.iconB64 && (
-                        <img src={`data:image/png;base64,${entry.iconB64}`} alt="" className="w-3 h-3 rounded-[1px] object-contain" />
+                      {entry?.icon_b64 && (
+                        <img src={`data:image/png;base64,${entry.icon_b64}`} alt="" className="w-3 h-3 rounded-[1px] object-contain" />
                       )}
                       {w.title.length > 30 ? w.title.slice(0, 30) + '...' : w.title}
                       <button
