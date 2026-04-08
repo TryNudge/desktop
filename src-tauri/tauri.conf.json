@@ -95,6 +95,21 @@
         "visible": false,
         "center": true,
         "url": "pages/settings.html"
+      },
+      {
+        "label": "dashboard",
+        "title": "Nudge Dashboard",
+        "width": 900,
+        "height": 620,
+        "minWidth": 720,
+        "minHeight": 500,
+        "resizable": true,
+        "decorations": false,
+        "transparent": true,
+        "visible": false,
+        "center": true,
+        "url": "pages/dashboard.html",
+        "backgroundColor": "#00000000"
       }
     ],
     "security": {

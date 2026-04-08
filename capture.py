@@ -99,6 +99,285 @@ def get_foreground_window() -> WindowInfo | None:
     )
 
 
+def _get_process_path(pid: int) -> str | None:
+    """Get the full executable path for a process ID."""
+    try:
+        PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+        kernel32 = ctypes.windll.kernel32
+        h = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+        if h:
+            buf = ctypes.create_unicode_buffer(260)
+            size = ctypes.wintypes.DWORD(260)
+            kernel32.QueryFullProcessImageNameW(h, 0, buf, ctypes.byref(size))
+            kernel32.CloseHandle(h)
+            return buf.value if buf.value else None
+    except Exception:
+        pass
+    return None
+
+
+def _extract_icon_b64(process_path: str | None, hwnd: int) -> str | None:
+    """Extract icon for a window/process as base64 PNG using DrawIconEx."""
+    try:
+        shell32 = ctypes.windll.shell32
+        user32 = ctypes.windll.user32
+        gdi32 = ctypes.windll.gdi32
+
+        hicon = None
+        owns_icon = False  # track if we need to destroy the icon
+
+        # Strategy 1: ExtractIconExW from exe path (most reliable)
+        if process_path:
+            large = (ctypes.c_void_p * 1)()
+            small = (ctypes.c_void_p * 1)()
+            count = shell32.ExtractIconExW(process_path, 0, large, small, 1)
+            if count > 0:
+                hicon = small[0] or large[0]
+                owns_icon = True
+                # Clean up the unused one
+                other = large[0] if hicon == small[0] else small[0]
+                if other:
+                    user32.DestroyIcon(other)
+
+        # Strategy 2: WM_GETICON
+        if not hicon:
+            hicon = user32.SendMessageW(hwnd, 0x007F, 0, 0)  # WM_GETICON, ICON_SMALL
+            if not hicon:
+                hicon = user32.SendMessageW(hwnd, 0x007F, 1, 0)  # ICON_BIG
+
+        # Strategy 3: GetClassLongPtrW
+        if not hicon:
+            hicon = user32.GetClassLongPtrW(hwnd, -34)  # GCLP_HICONSM
+            if not hicon:
+                hicon = user32.GetClassLongPtrW(hwnd, -14)  # GCL_HICON
+
+        if not hicon:
+            return None
+
+        # Render icon onto a 32x32 bitmap using DrawIconEx
+        w, h = 32, 32
+
+        class BITMAPINFOHEADER(ctypes.Structure):
+            _fields_ = [
+                ("biSize", ctypes.wintypes.DWORD),
+                ("biWidth", ctypes.c_long), ("biHeight", ctypes.c_long),
+                ("biPlanes", ctypes.c_ushort), ("biBitCount", ctypes.c_ushort),
+                ("biCompression", ctypes.wintypes.DWORD),
+                ("biSizeImage", ctypes.wintypes.DWORD),
+                ("biXPelsPerMeter", ctypes.c_long), ("biYPelsPerMeter", ctypes.c_long),
+                ("biClrUsed", ctypes.wintypes.DWORD), ("biClrImportant", ctypes.wintypes.DWORD),
+            ]
+
+        hdc_screen = user32.GetDC(0)
+        hdc_mem = gdi32.CreateCompatibleDC(hdc_screen)
+        hbm = gdi32.CreateCompatibleBitmap(hdc_screen, w, h)
+        old_bm = gdi32.SelectObject(hdc_mem, hbm)
+
+        # Draw icon
+        DI_NORMAL = 0x0003
+        user32.DrawIconEx(hdc_mem, 0, 0, hicon, w, h, 0, 0, DI_NORMAL)
+
+        # Extract pixels
+        bi = BITMAPINFOHEADER()
+        bi.biSize = ctypes.sizeof(BITMAPINFOHEADER)
+        bi.biWidth = w
+        bi.biHeight = -h  # top-down
+        bi.biPlanes = 1
+        bi.biBitCount = 32
+        bi.biCompression = 0
+
+        pixel_buf = ctypes.create_string_buffer(w * h * 4)
+        gdi32.GetDIBits(hdc_mem, hbm, 0, h, pixel_buf, ctypes.byref(bi), 0)
+
+        # Clean up GDI
+        gdi32.SelectObject(hdc_mem, old_bm)
+        gdi32.DeleteObject(hbm)
+        gdi32.DeleteDC(hdc_mem)
+        user32.ReleaseDC(0, hdc_screen)
+        if owns_icon:
+            user32.DestroyIcon(hicon)
+
+        # Convert to PNG
+        img = Image.frombuffer("RGBA", (w, h), pixel_buf.raw, "raw", "BGRA", 0, 1)
+        buf = io.BytesIO()
+        img.save(buf, format="PNG")
+        return base64.b64encode(buf.getvalue()).decode("utf-8")
+
+    except Exception:
+        return None
+
+
+# System window titles to skip when enumerating
+_SKIP_TITLES = {
+    "Program Manager", "MSCTFIME UI", "Default IME",
+    "Windows Input Experience", "Microsoft Text Input Application",
+    "Windows Shell Experience Host", "", "Search",
+}
+
+
+def enumerate_windows() -> list[dict]:
+    """List all visible top-level windows with title, process name, and icon."""
+    user32 = ctypes.windll.user32
+    results = []
+
+    class RECT(ctypes.Structure):
+        _fields_ = [("left", ctypes.c_long), ("top", ctypes.c_long),
+                     ("right", ctypes.c_long), ("bottom", ctypes.c_long)]
+
+    def callback(hwnd, _lparam):
+        if not user32.IsWindowVisible(hwnd):
+            return True
+
+        # Get title
+        length = user32.GetWindowTextLengthW(hwnd)
+        if length == 0:
+            return True
+        buf = ctypes.create_unicode_buffer(length + 1)
+        user32.GetWindowTextW(hwnd, buf, length + 1)
+        title = buf.value
+
+        if title in _SKIP_TITLES:
+            return True
+
+        # Skip tiny/hidden windows
+        rect = RECT()
+        user32.GetWindowRect(hwnd, ctypes.byref(rect))
+        w = rect.right - rect.left
+        h = rect.bottom - rect.top
+        if w < 50 or h < 50:
+            return True
+
+        # Get process info
+        pid = ctypes.wintypes.DWORD()
+        user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+        proc_path = _get_process_path(pid.value)
+        process_name = proc_path.rsplit("\\", 1)[-1] if proc_path else f"pid:{pid.value}"
+
+        # Extract icon
+        icon_b64 = _extract_icon_b64(proc_path, hwnd)
+
+        results.append({
+            "hwnd": hwnd,
+            "title": title,
+            "process_name": process_name,
+            "icon_b64": icon_b64,
+            "rect": {"x": rect.left, "y": rect.top, "w": w, "h": h},
+        })
+        return True
+
+    WNDENUMPROC = ctypes.WINFUNCTYPE(ctypes.wintypes.BOOL, ctypes.wintypes.HWND, ctypes.wintypes.LPARAM)
+    user32.EnumWindows(WNDENUMPROC(callback), 0)
+
+    return results
+
+
+def capture_window(hwnd: int) -> dict | None:
+    """Capture a specific window by HWND, even if it's behind other windows.
+
+    Uses PrintWindow with PW_RENDERFULLCONTENT for background capture.
+    Returns dict with screenshot_b64, dimensions, scale_factor, or None on failure.
+    """
+    user32 = ctypes.windll.user32
+    gdi32 = ctypes.windll.gdi32
+
+    if not user32.IsWindow(hwnd):
+        return None
+
+    # Check if minimized — can't capture minimized windows
+    if user32.IsIconic(hwnd):
+        return {"error": "window_minimized", "hwnd": hwnd}
+
+    # Get window rect
+    class RECT(ctypes.Structure):
+        _fields_ = [("left", ctypes.c_long), ("top", ctypes.c_long),
+                     ("right", ctypes.c_long), ("bottom", ctypes.c_long)]
+
+    rect = RECT()
+    user32.GetWindowRect(hwnd, ctypes.byref(rect))
+    w = rect.right - rect.left
+    h = rect.bottom - rect.top
+    if w <= 0 or h <= 0:
+        return None
+
+    # Get window title
+    length = user32.GetWindowTextLengthW(hwnd)
+    buf = ctypes.create_unicode_buffer(max(length + 1, 1))
+    user32.GetWindowTextW(hwnd, buf, length + 1)
+    title = buf.value
+
+    # Create compatible DC and bitmap
+    hdc_screen = user32.GetDC(0)
+    hdc_mem = gdi32.CreateCompatibleDC(hdc_screen)
+    hbm = gdi32.CreateCompatibleBitmap(hdc_screen, w, h)
+    old_bm = gdi32.SelectObject(hdc_mem, hbm)
+
+    # PrintWindow with PW_RENDERFULLCONTENT
+    PW_RENDERFULLCONTENT = 0x00000002
+    success = user32.PrintWindow(hwnd, hdc_mem, PW_RENDERFULLCONTENT)
+
+    if not success:
+        # Fallback: try without PW_RENDERFULLCONTENT
+        success = user32.PrintWindow(hwnd, hdc_mem, 0)
+
+    if not success:
+        gdi32.SelectObject(hdc_mem, old_bm)
+        gdi32.DeleteObject(hbm)
+        gdi32.DeleteDC(hdc_mem)
+        user32.ReleaseDC(0, hdc_screen)
+        return None
+
+    # Extract bitmap bits
+    class BITMAPINFOHEADER(ctypes.Structure):
+        _fields_ = [
+            ("biSize", ctypes.wintypes.DWORD),
+            ("biWidth", ctypes.c_long),
+            ("biHeight", ctypes.c_long),
+            ("biPlanes", ctypes.c_ushort),
+            ("biBitCount", ctypes.c_ushort),
+            ("biCompression", ctypes.wintypes.DWORD),
+            ("biSizeImage", ctypes.wintypes.DWORD),
+            ("biXPelsPerMeter", ctypes.c_long),
+            ("biYPelsPerMeter", ctypes.c_long),
+            ("biClrUsed", ctypes.wintypes.DWORD),
+            ("biClrImportant", ctypes.wintypes.DWORD),
+        ]
+
+    bi = BITMAPINFOHEADER()
+    bi.biSize = ctypes.sizeof(BITMAPINFOHEADER)
+    bi.biWidth = w
+    bi.biHeight = -h  # top-down
+    bi.biPlanes = 1
+    bi.biBitCount = 32
+    bi.biCompression = 0
+
+    buf_size = w * h * 4
+    pixel_buf = ctypes.create_string_buffer(buf_size)
+    gdi32.GetDIBits(hdc_mem, hbm, 0, h, pixel_buf, ctypes.byref(bi), 0)
+
+    # Clean up GDI
+    gdi32.SelectObject(hdc_mem, old_bm)
+    gdi32.DeleteObject(hbm)
+    gdi32.DeleteDC(hdc_mem)
+    user32.ReleaseDC(0, hdc_screen)
+
+    # Convert to PIL Image (BGRA → RGB)
+    img = Image.frombuffer("RGBA", (w, h), pixel_buf.raw, "raw", "BGRA", 0, 1)
+    img = img.convert("RGB")
+
+    original_dims = {"w": w, "h": h}
+    resized, scale_factor = downscale(img)
+    b64 = image_to_base64(resized)
+
+    return {
+        "screenshot_b64": b64,
+        "screenshot_dimensions": {"w": resized.width, "h": resized.height},
+        "original_dimensions": original_dims,
+        "scale_factor": scale_factor,
+        "hwnd": hwnd,
+        "title": title,
+    }
+
+
 def find_monitor_for_window(window_rect: dict) -> dict | None:
     """Find which mss monitor contains the center of the given window."""
     cx = window_rect["x"] + window_rect["w"] // 2

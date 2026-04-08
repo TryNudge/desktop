@@ -49,7 +49,7 @@ export default function App() {
         await new Promise((r) => setTimeout(r, 500))
         emit('show-loading')
         const response = await api.submitQuery(q, researchMode)
-
+        // TODO: refractor this
         if (response.response_type === 'answer') {
           // Rust already showed the answer window
         } else if (response.response_type === 'hybrid') {

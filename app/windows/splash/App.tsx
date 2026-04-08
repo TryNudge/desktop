@@ -74,7 +74,7 @@ export default function App() {
   const handleNext = () => {
     if (currentSlide === LAST_SLIDE) {
       getCurrentWindow().hide()
-      api.showInput().catch(console.error)
+      api.showDashboard().catch(console.error)
     } else {
       goTo(currentSlide + 1)
     }

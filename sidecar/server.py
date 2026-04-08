@@ -17,6 +17,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from capture import (
     capture_context, uia_to_dict, ground_step_with_uia,
+    enumerate_windows, capture_window,
 )
 from brain import StepPlan, Step, Target
 
@@ -210,6 +211,25 @@ def _ground_single_step(step, context, uia_on, ocr_detections):
     }
 
 
+def handle_enumerate_windows(params: dict) -> dict:
+    """List all visible top-level windows."""
+    windows = enumerate_windows()
+    return {"result": windows}
+
+
+def handle_capture_window(params: dict) -> dict:
+    """Capture a specific window by HWND."""
+    hwnd = params.get("hwnd")
+    if hwnd is None:
+        return {"error": "hwnd is required"}
+    result = capture_window(int(hwnd))
+    if result is None:
+        return {"error": f"failed to capture window {hwnd}"}
+    if isinstance(result, dict) and result.get("error") == "window_minimized":
+        return {"error": f"window is minimized (hwnd {hwnd})"}
+    return {"result": result}
+
+
 def handle_health_check(params: dict) -> dict:
     return {"result": "ok"}
 
@@ -220,6 +240,8 @@ HANDLERS = {
     "set_grounding": handle_set_grounding,
     "get_settings": handle_get_settings,
     "health_check": handle_health_check,
+    "enumerate_windows": handle_enumerate_windows,
+    "capture_window": handle_capture_window,
 }
 
 

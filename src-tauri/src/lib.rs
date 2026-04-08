@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};
 use std::os::windows::process::CommandExt;
 use std::process::{Child, Command, Stdio};
@@ -26,6 +27,75 @@ struct CompletedSteps(Mutex<Vec<String>>);
 struct ResearchMode(Mutex<bool>);
 struct SessionId(Mutex<Option<String>>);
 struct PendingAnswer(Mutex<Option<AnswerPayload>>);
+
+// ── Agent state ───────────────────────────────────────────────────────────
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(rename_all = "camelCase")]
+struct AgentActivityEntry {
+    id: String,
+    #[serde(rename = "type")]
+    entry_type: String,
+    content: String,
+    timestamp: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    duration_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    details: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    window_name: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(rename_all = "camelCase")]
+struct AgentWindowTarget {
+    hwnd: i64,
+    title: String,
+    process_name: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(rename_all = "camelCase")]
+struct AgentData {
+    id: String,
+    name: String,
+    icon: Option<String>,
+    windows: Vec<AgentWindowTarget>,
+    interval: u64,
+    goal: String,
+    mode: String,
+    status: String,
+    last_activity: Option<String>,
+    created_at: String,
+    activity_log: Vec<AgentActivityEntry>,
+    has_run: bool,
+}
+
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct AgentActivityEvent {
+    agent_id: String,
+    entry: AgentActivityEntry,
+}
+
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct AgentStatusEvent {
+    agent_id: String,
+    status: String,
+}
+
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct AgentIconEvent {
+    agent_id: String,
+    icon: String,
+}
+
+struct AgentManager {
+    agents: Mutex<HashMap<String, AgentData>>,
+    cancel_senders: Mutex<HashMap<String, tokio::sync::watch::Sender<bool>>>,
+}
 
 // ── Keybinds ───────────────────────────────────────────────────────────────
 
@@ -81,7 +151,6 @@ impl SidecarProcess {
 }
 
 fn spawn_sidecar(app: &tauri::App) -> Result<SidecarProcess, String> {
-    // The bundled sidecar exe sits next to the main exe
     let current_exe = std::env::current_exe().unwrap_or_default();
     eprintln!("[nudge] current exe: {}", current_exe.display());
     let exe_dir = current_exe
@@ -90,46 +159,48 @@ fn spawn_sidecar(app: &tauri::App) -> Result<SidecarProcess, String> {
         .to_path_buf();
     eprintln!("[nudge] exe dir: {}", exe_dir.display());
 
-    // Tauri names it with the target triple
-    let sidecar_names = [
-        "sidecar-x86_64-pc-windows-msvc.exe",
-        "sidecar.exe",
-    ];
+    // In dev mode, always prefer Python so we pick up code changes
+    #[cfg(not(dev))]
+    {
+        let sidecar_names = [
+            "sidecar-x86_64-pc-windows-msvc.exe",
+            "sidecar.exe",
+        ];
 
-    for name in &sidecar_names {
-        let path = exe_dir.join(name);
-        if path.exists() {
-            eprintln!("[nudge] using bundled sidecar: {}", path.display());
-            let child = Command::new(&path)
-                .stdin(Stdio::piped())
-                .stdout(Stdio::piped())
-                .stderr(Stdio::inherit())
-                .creation_flags(0x08000000) // CREATE_NO_WINDOW
-                .spawn()
-                .map_err(|e| format!("failed to spawn bundled sidecar: {}", e))?;
-            return Ok(SidecarProcess { child });
-        }
-    }
-
-    // Also check the resource dir (NSIS installs may put it there)
-    if let Ok(resource_dir) = app.path().resource_dir() {
         for name in &sidecar_names {
-            let path = resource_dir.join(name);
+            let path = exe_dir.join(name);
             if path.exists() {
-                eprintln!("[nudge] using resource sidecar: {}", path.display());
+                eprintln!("[nudge] using bundled sidecar: {}", path.display());
                 let child = Command::new(&path)
                     .stdin(Stdio::piped())
                     .stdout(Stdio::piped())
                     .stderr(Stdio::inherit())
-                    .creation_flags(0x08000000) // CREATE_NO_WINDOW
+                    .creation_flags(0x08000000)
                     .spawn()
-                    .map_err(|e| format!("failed to spawn resource sidecar: {}", e))?;
+                    .map_err(|e| format!("failed to spawn bundled sidecar: {}", e))?;
                 return Ok(SidecarProcess { child });
+            }
+        }
+
+        if let Ok(resource_dir) = app.path().resource_dir() {
+            for name in &sidecar_names {
+                let path = resource_dir.join(name);
+                if path.exists() {
+                    eprintln!("[nudge] using resource sidecar: {}", path.display());
+                    let child = Command::new(&path)
+                        .stdin(Stdio::piped())
+                        .stdout(Stdio::piped())
+                        .stderr(Stdio::inherit())
+                        .creation_flags(0x08000000)
+                        .spawn()
+                        .map_err(|e| format!("failed to spawn resource sidecar: {}", e))?;
+                    return Ok(SidecarProcess { child });
+                }
             }
         }
     }
 
-    // Dev mode fallback: use Python
+    // Dev mode / fallback: use Python directly
     eprintln!("[nudge] bundled sidecar not found, falling back to Python");
     let project_root = find_project_root_dev()?;
     let sidecar_path = project_root.join("sidecar").join("server.py");
@@ -377,6 +448,666 @@ async fn show_input(app_handle: AppHandle) -> Result<(), String> {
         let _ = input_win.set_focus();
     }
     Ok(())
+}
+
+#[tauri::command]
+async fn show_dashboard(app_handle: AppHandle) -> Result<(), String> {
+    if let Some(win) = app_handle.get_webview_window("dashboard") {
+        let _ = win.center();
+        let _ = win.show();
+        let _ = win.set_focus();
+    }
+    Ok(())
+}
+
+// ── Agent commands ─────────────────────────────────────────────────────────
+
+#[derive(Serialize, Deserialize, Debug)]
+struct WindowEntry {
+    hwnd: i64,
+    title: String,
+    process_name: String,
+    icon_b64: Option<String>,
+    rect: serde_json::Value,
+}
+
+#[tauri::command]
+async fn enumerate_windows(sidecar: State<'_, Sidecar>) -> Result<Vec<WindowEntry>, String> {
+    let request = serde_json::json!({"method": "enumerate_windows", "params": {}});
+    let response = {
+        let mut guard = sidecar.0.lock().map_err(|e| e.to_string())?;
+        let proc = guard.as_mut().ok_or("sidecar not running")?;
+        proc.send(&request)?
+    };
+    // Check for sidecar error
+    if let Some(err) = response.get("error") {
+        return Err(format!("sidecar error: {}", err));
+    }
+    let result = response.get("result")
+        .ok_or_else(|| format!("no result from sidecar, got: {}", response))?;
+    let arr = result.as_array()
+        .ok_or_else(|| format!("result is not an array: {}", result))?;
+    let windows: Vec<WindowEntry> = arr
+        .iter()
+        .filter_map(|v| {
+            serde_json::from_value(v.clone()).map_err(|e| {
+                eprintln!("[nudge] failed to parse window entry: {} — {:?}", e, v);
+                e
+            }).ok()
+        })
+        .collect();
+    eprintln!("[nudge] enumerate_windows: {} windows found", windows.len());
+    Ok(windows)
+}
+
+#[tauri::command]
+async fn create_agent(
+    app_handle: AppHandle,
+    token_state: State<'_, AuthToken>,
+    agent_mgr: State<'_, AgentManager>,
+    name: String,
+    windows: Vec<AgentWindowTarget>,
+    interval: u64,
+    goal: String,
+    mode: String,
+) -> Result<AgentData, String> {
+    let token = token_state.0.lock().map_err(|e| e.to_string())?
+        .clone().ok_or("not authenticated")?;
+
+    // Create agent via NudgePlatform API
+    let client = reqwest::Client::new();
+    let body = serde_json::json!({
+        "name": name,
+        "windows": windows.iter().map(|w| serde_json::json!({"title": w.title, "processName": w.process_name})).collect::<Vec<_>>(),
+        "interval": interval,
+        "goal": goal,
+        "mode": mode,
+    });
+
+    let resp = client
+        .post(format!("{}/api/v1/agents", PLATFORM_URL))
+        .header("Authorization", format!("Bearer {}", token))
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| format!("network error: {}", e))?;
+
+    if !resp.status().is_success() {
+        let text = resp.text().await.unwrap_or_default();
+        return Err(format!("API error: {}", text));
+    }
+
+    let api_agent: serde_json::Value = resp.json().await.map_err(|e| e.to_string())?;
+    let id = api_agent["id"].as_str().unwrap_or("unknown").to_string();
+
+    let now = chrono_now();
+    let agent = AgentData {
+        id: id.clone(),
+        name,
+        icon: None,
+        windows,
+        interval,
+        goal,
+        mode,
+        status: "idle".to_string(),
+        last_activity: None,
+        created_at: now,
+        activity_log: vec![],
+        has_run: false,
+    };
+
+    agent_mgr.agents.lock().map_err(|e| e.to_string())?.insert(id, agent.clone());
+    let _ = app_handle.emit("agent-created", &agent);
+    Ok(agent)
+}
+
+#[tauri::command]
+async fn get_agents(
+    token_state: State<'_, AuthToken>,
+    agent_mgr: State<'_, AgentManager>,
+) -> Result<Vec<AgentData>, String> {
+    let token = token_state.0.lock().map_err(|e| e.to_string())?
+        .clone().ok_or("not authenticated")?;
+
+    // Fetch from platform API
+    let client = reqwest::Client::new();
+    let resp = client
+        .get(format!("{}/api/v1/agents", PLATFORM_URL))
+        .header("Authorization", format!("Bearer {}", token))
+        .send()
+        .await
+        .map_err(|e| format!("network error: {}", e))?;
+
+    if !resp.status().is_success() {
+        // Fall back to local cache
+        let agents = agent_mgr.agents.lock().map_err(|e| e.to_string())?;
+        return Ok(agents.values().cloned().collect());
+    }
+
+    let api_agents: Vec<serde_json::Value> = resp.json().await.map_err(|e| e.to_string())?;
+    let mut cache = agent_mgr.agents.lock().map_err(|e| e.to_string())?;
+
+    let mut result = Vec::new();
+    for a in api_agents {
+        let id = a["id"].as_str().unwrap_or("").to_string();
+        if let Some(existing) = cache.get(&id) {
+            // Keep local state (status, activity_log) but sync config from server
+            let mut merged = existing.clone();
+            merged.name = a["name"].as_str().unwrap_or(&merged.name).to_string();
+            merged.icon = a["icon"].as_str().map(|s| s.to_string()).or(merged.icon.clone());
+            merged.goal = a["goal"].as_str().unwrap_or(&merged.goal).to_string();
+            merged.mode = a["mode"].as_str().unwrap_or(&merged.mode).to_string();
+            merged.interval = a["interval"].as_u64().unwrap_or(merged.interval);
+            cache.insert(id, merged.clone());
+            result.push(merged);
+        } else {
+            // New agent from server
+            let windows: Vec<AgentWindowTarget> = a["windows"]
+                .as_array()
+                .map(|arr| arr.iter().filter_map(|w| {
+                    Some(AgentWindowTarget {
+                        hwnd: 0, // will be re-resolved on this PC
+                        title: w["title"].as_str()?.to_string(),
+                        process_name: w["processName"].as_str().unwrap_or("").to_string(),
+                    })
+                }).collect())
+                .unwrap_or_default();
+
+            // Build activity log from server activities
+            let activities: Vec<AgentActivityEntry> = a["activities"]
+                .as_array()
+                .map(|arr| arr.iter().filter_map(|act| {
+                    Some(AgentActivityEntry {
+                        id: act["id"].as_str()?.to_string(),
+                        entry_type: act["type"].as_str()?.to_string(),
+                        content: act["content"].as_str()?.to_string(),
+                        timestamp: act["createdAt"].as_str()?.to_string(),
+                        duration_ms: act["durationMs"].as_u64(),
+                        details: act["details"].as_str().map(|s| s.to_string()),
+                        window_name: act["windowName"].as_str().map(|s| s.to_string()),
+                    })
+                }).collect())
+                .unwrap_or_default();
+
+            let agent = AgentData {
+                id: id.clone(),
+                name: a["name"].as_str().unwrap_or("").to_string(),
+                icon: a["icon"].as_str().map(|s| s.to_string()),
+                windows,
+                interval: a["interval"].as_u64().unwrap_or(10),
+                goal: a["goal"].as_str().unwrap_or("").to_string(),
+                mode: a["mode"].as_str().unwrap_or("guide").to_string(),
+                status: "idle".to_string(),
+                last_activity: None,
+                created_at: a["createdAt"].as_str().unwrap_or("").to_string(),
+                activity_log: activities,
+                has_run: a["icon"].as_str().is_some(), // if icon exists, it has run before
+            };
+            cache.insert(id, agent.clone());
+            result.push(agent);
+        }
+    }
+
+    Ok(result)
+}
+
+#[tauri::command]
+async fn delete_agent(
+    app_handle: AppHandle,
+    token_state: State<'_, AuthToken>,
+    agent_mgr: State<'_, AgentManager>,
+    id: String,
+) -> Result<(), String> {
+    // Stop if running
+    {
+        let senders = agent_mgr.cancel_senders.lock().map_err(|e| e.to_string())?;
+        if let Some(sender) = senders.get(&id) {
+            let _ = sender.send(true);
+        }
+    }
+
+    // Delete from platform
+    let token = token_state.0.lock().map_err(|e| e.to_string())?
+        .clone().ok_or("not authenticated")?;
+    let client = reqwest::Client::new();
+    let _ = client
+        .delete(format!("{}/api/v1/agents/{}", PLATFORM_URL, id))
+        .header("Authorization", format!("Bearer {}", token))
+        .send()
+        .await;
+
+    // Remove from local cache
+    agent_mgr.agents.lock().map_err(|e| e.to_string())?.remove(&id);
+    agent_mgr.cancel_senders.lock().map_err(|e| e.to_string())?.remove(&id);
+
+    let _ = app_handle.emit("agent-deleted", &id);
+    Ok(())
+}
+
+#[tauri::command]
+async fn update_agent(
+    token_state: State<'_, AuthToken>,
+    agent_mgr: State<'_, AgentManager>,
+    id: String,
+    name: Option<String>,
+    windows: Option<Vec<AgentWindowTarget>>,
+    interval: Option<u64>,
+    goal: Option<String>,
+    mode: Option<String>,
+) -> Result<AgentData, String> {
+    let token = token_state.0.lock().map_err(|e| e.to_string())?
+        .clone().ok_or("not authenticated")?;
+
+    let mut body = serde_json::Map::new();
+    if let Some(v) = &name { body.insert("name".into(), serde_json::json!(v)); }
+    if let Some(v) = &windows {
+        body.insert("windows".into(), serde_json::json!(v.iter().map(|w| serde_json::json!({"title": w.title, "processName": w.process_name})).collect::<Vec<_>>()));
+    }
+    if let Some(v) = interval { body.insert("interval".into(), serde_json::json!(v)); }
+    if let Some(v) = &goal { body.insert("goal".into(), serde_json::json!(v)); }
+    if let Some(v) = &mode { body.insert("mode".into(), serde_json::json!(v)); }
+
+    let client = reqwest::Client::new();
+    let _ = client
+        .patch(format!("{}/api/v1/agents/{}", PLATFORM_URL, id))
+        .header("Authorization", format!("Bearer {}", token))
+        .json(&serde_json::Value::Object(body))
+        .send()
+        .await;
+
+    // Update local cache
+    let mut cache = agent_mgr.agents.lock().map_err(|e| e.to_string())?;
+    let agent = cache.get_mut(&id).ok_or("agent not found")?;
+    if let Some(v) = name { agent.name = v; }
+    if let Some(v) = windows { agent.windows = v; }
+    if let Some(v) = interval { agent.interval = v; }
+    if let Some(v) = goal { agent.goal = v; }
+    if let Some(v) = mode { agent.mode = v; }
+
+    Ok(agent.clone())
+}
+
+#[tauri::command]
+async fn start_agent(
+    app_handle: AppHandle,
+    token_state: State<'_, AuthToken>,
+    sidecar: State<'_, Sidecar>,
+    agent_mgr: State<'_, AgentManager>,
+    id: String,
+) -> Result<(), String> {
+    let token = token_state.0.lock().map_err(|e| e.to_string())?
+        .clone().ok_or("not authenticated")?;
+
+    // Read agent config
+    let agent = {
+        let cache = agent_mgr.agents.lock().map_err(|e| e.to_string())?;
+        cache.get(&id).cloned().ok_or("agent not found")?
+    };
+
+    // Create cancellation channel
+    let (cancel_tx, cancel_rx) = tokio::sync::watch::channel(false);
+    {
+        let mut senders = agent_mgr.cancel_senders.lock().map_err(|e| e.to_string())?;
+        senders.insert(id.clone(), cancel_tx);
+    }
+
+    // Set status to running
+    {
+        let mut cache = agent_mgr.agents.lock().map_err(|e| e.to_string())?;
+        if let Some(a) = cache.get_mut(&id) {
+            a.status = "running".to_string();
+        }
+    }
+
+    let _ = app_handle.emit("agent-status-changed", AgentStatusEvent {
+        agent_id: id.clone(),
+        status: "running".to_string(),
+    });
+
+    // Emit system entry
+    let sys_entry = AgentActivityEntry {
+        id: format!("e-{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis()),
+        entry_type: "system".to_string(),
+        content: format!("Agent started. Monitoring {} window(s) every {}s.", agent.windows.len(), agent.interval),
+        timestamp: chrono_now(),
+        duration_ms: None, details: None, window_name: None,
+    };
+    {
+        let mut cache = agent_mgr.agents.lock().map_err(|e| e.to_string())?;
+        if let Some(a) = cache.get_mut(&id) {
+            a.activity_log.push(sys_entry.clone());
+        }
+    }
+    let _ = app_handle.emit("agent-activity", AgentActivityEvent { agent_id: id.clone(), entry: sys_entry });
+
+    // Spawn the async runner
+    let app = app_handle.clone();
+    let agent_id = id.clone();
+    let is_first_run = !agent.has_run;
+    tauri::async_runtime::spawn(async move {
+        run_agent_loop(app, agent_id, token, agent, cancel_rx, is_first_run).await;
+    });
+
+    Ok(())
+}
+
+async fn run_agent_loop(
+    app: AppHandle,
+    agent_id: String,
+    token: String,
+    agent: AgentData,
+    mut cancel_rx: tokio::sync::watch::Receiver<bool>,
+    mut is_first_run: bool,
+) {
+    let interval_secs = agent.interval;
+    let windows = agent.windows.clone();
+
+    loop {
+        if *cancel_rx.borrow() { break; }
+
+        // 1. Re-resolve HWNDs by enumerating current windows and matching by title
+        let resolved_windows = {
+            let enum_request = serde_json::json!({"method": "enumerate_windows", "params": {}});
+            let enum_result = {
+                let sidecar_state = app.state::<Sidecar>();
+                let mut guard = match sidecar_state.0.lock() {
+                    Ok(g) => g,
+                    Err(_) => { eprintln!("[nudge] agent {}: sidecar lock failed", agent_id); continue; },
+                };
+                match guard.as_mut() {
+                    Some(proc) => proc.send(&enum_request).ok(),
+                    None => None,
+                }
+            };
+
+            let mut resolved = Vec::new();
+            if let Some(resp) = enum_result {
+                if let Some(arr) = resp.get("result").and_then(|v| v.as_array()) {
+                    for target in &windows {
+                        // Match by title substring or process name
+                        for w in arr {
+                            let title = w["title"].as_str().unwrap_or("");
+                            let proc = w["process_name"].as_str().unwrap_or("");
+                            let hwnd = w["hwnd"].as_i64().unwrap_or(0);
+                            if hwnd > 0 && (title == target.title || proc == target.process_name) {
+                                resolved.push((hwnd, target.title.clone()));
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+            resolved
+        };
+
+        // 2. Capture screenshots
+        let mut screenshots = Vec::new();
+        for (hwnd, title) in &resolved_windows {
+            let request = serde_json::json!({
+                "method": "capture_window",
+                "params": {"hwnd": hwnd}
+            });
+
+            let capture_result = {
+                let sidecar_state = app.state::<Sidecar>();
+                let mut guard = match sidecar_state.0.lock() {
+                    Ok(g) => g,
+                    Err(_) => continue,
+                };
+                match guard.as_mut() {
+                    Some(proc) => proc.send(&request),
+                    None => continue,
+                }
+            };
+
+            match capture_result {
+                Ok(resp) => {
+                    if let Some(err) = resp.get("error") {
+                        eprintln!("[nudge] agent {}: capture_window error for '{}' (hwnd {}): {}", agent_id, title, hwnd, err);
+                        emit_dev_log(&app, "sidecar", "warn", &format!("capture_window failed for '{}' (hwnd {}): {}", title, hwnd, err));
+                    } else if let Some(result) = resp.get("result") {
+                        screenshots.push(serde_json::json!({
+                            "window_title": title,
+                            "screenshot_b64": result.get("screenshot_b64").and_then(|v| v.as_str()).unwrap_or(""),
+                            "dimensions": result.get("screenshot_dimensions"),
+                        }));
+                    } else {
+                        eprintln!("[nudge] agent {}: unexpected sidecar response for '{}': {}", agent_id, title, resp);
+                    }
+                }
+                Err(e) => {
+                    eprintln!("[nudge] agent {}: sidecar call failed for '{}': {}", agent_id, title, e);
+                }
+            }
+        }
+
+        if screenshots.is_empty() {
+            eprintln!("[nudge] agent {}: no screenshots captured, skipping", agent_id);
+            emit_dev_log(&app, "agent", "warn", &format!("agent {}: no screenshots captured, skipping", agent_id));
+        } else {
+            // 2. Call platform /api/v1/agents/:id/run
+            eprintln!("[nudge] agent {}: sending {} screenshots to platform", agent_id, screenshots.len());
+            emit_dev_log(&app, "agent", "info", &format!("agent {}: sending {} screenshots to platform", agent_id, screenshots.len()));
+            let client = reqwest::Client::new();
+            let body = serde_json::json!({
+                "screenshots": screenshots,
+                "is_first_run": is_first_run,
+            });
+
+            let start = std::time::Instant::now();
+            let result = client
+                .post(format!("{}/api/v1/agents/{}/run", PLATFORM_URL, agent_id))
+                .header("Authorization", format!("Bearer {}", token))
+                .json(&body)
+                .send()
+                .await;
+
+            let duration_ms = start.elapsed().as_millis() as u64;
+
+            match result {
+                Ok(resp) if resp.status().is_success() => {
+                    if let Ok(data) = resp.json::<serde_json::Value>().await {
+                        let observation = data["observation"].as_str().unwrap_or("No observation").to_string();
+                        let details = data["details"].as_str().map(|s| s.to_string());
+                        let window_name = data["window_name"].as_str().map(|s| s.to_string());
+
+                        let entry = AgentActivityEntry {
+                            id: format!("e-{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis()),
+                            entry_type: "observation".to_string(),
+                            content: observation,
+                            timestamp: chrono_now(),
+                            duration_ms: Some(duration_ms),
+                            details,
+                            window_name,
+                        };
+
+                        // Update local cache
+                        {
+                            let mgr = app.state::<AgentManager>();
+                            let mut cache = mgr.agents.lock().unwrap_or_else(|e| e.into_inner());
+                            if let Some(a) = cache.get_mut(&agent_id) {
+                                a.activity_log.push(entry.clone());
+                                a.last_activity = Some(chrono_now());
+                                if is_first_run {
+                                    a.has_run = true;
+                                }
+                            }
+                        }
+
+                        let _ = app.emit("agent-activity", AgentActivityEvent { agent_id: agent_id.clone(), entry });
+                        emit_dev_log(&app, "agent", "info", &format!("agent {} observation ({}ms): {}", agent_id, duration_ms, data["observation"].as_str().unwrap_or("")));
+                        emit_dev_log(&app, "platform", "debug", &format!("raw response: {}", serde_json::to_string(&data).unwrap_or_default()));
+
+                        // Handle icon from first run
+                        if is_first_run {
+                            if let Some(icon) = data["icon"].as_str() {
+                                let mgr = app.state::<AgentManager>();
+                                let mut cache = mgr.agents.lock().unwrap_or_else(|e| e.into_inner());
+                                if let Some(a) = cache.get_mut(&agent_id) {
+                                    a.icon = Some(icon.to_string());
+                                }
+                                let _ = app.emit("agent-icon-updated", AgentIconEvent {
+                                    agent_id: agent_id.clone(),
+                                    icon: icon.to_string(),
+                                });
+                            }
+                            is_first_run = false;
+                        }
+                    }
+                }
+                Ok(resp) => {
+                    let status = resp.status();
+                    let text = resp.text().await.unwrap_or_default();
+                    eprintln!("[nudge] agent {} run failed: {} {}", agent_id, status, text);
+                    emit_dev_log(&app, "agent", "error", &format!("agent {} run failed: {} {}", agent_id, status, text));
+                    let entry = AgentActivityEntry {
+                        id: format!("e-{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis()),
+                        entry_type: "system".to_string(),
+                        content: format!("Error: API returned {}", status),
+                        timestamp: chrono_now(),
+                        duration_ms: Some(duration_ms), details: Some(text), window_name: None,
+                    };
+                    let _ = app.emit("agent-activity", AgentActivityEvent { agent_id: agent_id.clone(), entry });
+                }
+                Err(e) => {
+                    eprintln!("[nudge] agent {} network error: {}", agent_id, e);
+                    emit_dev_log(&app, "agent", "error", &format!("agent {} network error: {}", agent_id, e));
+                    let entry = AgentActivityEntry {
+                        id: format!("e-{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis()),
+                        entry_type: "system".to_string(),
+                        content: format!("Network error: {}", e),
+                        timestamp: chrono_now(),
+                        duration_ms: None, details: None, window_name: None,
+                    };
+                    let _ = app.emit("agent-activity", AgentActivityEvent { agent_id: agent_id.clone(), entry });
+                }
+            }
+        }
+
+        // 3. Sleep for interval, interruptible by cancel
+        tokio::select! {
+            _ = tokio::time::sleep(std::time::Duration::from_secs(interval_secs)) => {},
+            _ = cancel_rx.changed() => {
+                if *cancel_rx.borrow() { break; }
+            }
+        }
+    }
+
+    // Cleanup: set status to idle
+    {
+        let mgr = app.state::<AgentManager>();
+        let mut cache = mgr.agents.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(a) = cache.get_mut(&agent_id) {
+            a.status = "idle".to_string();
+        }
+    }
+    let stop_entry = AgentActivityEntry {
+        id: format!("e-{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis()),
+        entry_type: "system".to_string(),
+        content: "Agent stopped.".to_string(),
+        timestamp: chrono_now(),
+        duration_ms: None, details: None, window_name: None,
+    };
+    let _ = app.emit("agent-activity", AgentActivityEvent { agent_id: agent_id.clone(), entry: stop_entry });
+    let _ = app.emit("agent-status-changed", AgentStatusEvent { agent_id, status: "idle".to_string() });
+}
+
+#[tauri::command]
+async fn stop_agent(
+    app_handle: AppHandle,
+    agent_mgr: State<'_, AgentManager>,
+    id: String,
+) -> Result<(), String> {
+    {
+        let senders = agent_mgr.cancel_senders.lock().map_err(|e| e.to_string())?;
+        if let Some(sender) = senders.get(&id) {
+            let _ = sender.send(true);
+        }
+    }
+
+    let mut cache = agent_mgr.agents.lock().map_err(|e| e.to_string())?;
+    if let Some(agent) = cache.get_mut(&id) {
+        agent.status = "idle".to_string();
+    }
+
+    let _ = app_handle.emit("agent-status-changed", AgentStatusEvent {
+        agent_id: id.clone(),
+        status: "idle".to_string(),
+    });
+
+    Ok(())
+}
+
+#[tauri::command]
+async fn send_agent_message(
+    app_handle: AppHandle,
+    token_state: State<'_, AuthToken>,
+    agent_mgr: State<'_, AgentManager>,
+    id: String,
+    content: String,
+) -> Result<(), String> {
+    let token = token_state.0.lock().map_err(|e| e.to_string())?
+        .clone().ok_or("not authenticated")?;
+
+    // Send to platform API
+    let client = reqwest::Client::new();
+    let _ = client
+        .post(format!("{}/api/v1/agents/{}/message", PLATFORM_URL, id))
+        .header("Authorization", format!("Bearer {}", token))
+        .json(&serde_json::json!({"content": content}))
+        .send()
+        .await;
+
+    let now = chrono_now();
+    let entry = AgentActivityEntry {
+        id: format!("e-{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis()),
+        entry_type: "user".to_string(),
+        content: content.clone(),
+        timestamp: now,
+        duration_ms: None,
+        details: None,
+        window_name: None,
+    };
+
+    // Add to local cache
+    {
+        let mut cache = agent_mgr.agents.lock().map_err(|e| e.to_string())?;
+        if let Some(agent) = cache.get_mut(&id) {
+            agent.activity_log.push(entry.clone());
+        }
+    }
+
+    let _ = app_handle.emit("agent-activity", AgentActivityEvent {
+        agent_id: id,
+        entry,
+    });
+
+    Ok(())
+}
+
+fn chrono_now() -> String {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis();
+    format!("{}", now)
+}
+
+#[derive(Serialize, Clone)]
+struct DevLogEvent {
+    source: String,
+    level: String,
+    message: String,
+    timestamp: String,
+}
+
+fn emit_dev_log(app: &AppHandle, source: &str, level: &str, msg: &str) {
+    let _ = app.emit("dev-log", DevLogEvent {
+        source: source.to_string(),
+        level: level.to_string(),
+        message: msg.to_string(),
+        timestamp: chrono_now(),
+    });
 }
 
 // ── Keybind commands ───────────────────────────────────────────────────────
@@ -1235,6 +1966,10 @@ fn setup_windows(app: &AppHandle) {
         apply_rounded_corners(&settings, 16);
     }
 
+    if let Some(dashboard) = app.get_webview_window("dashboard") {
+        let _ = dashboard.set_shadow(false);
+    }
+
     // Answer popup: interactive (NOT click-through), rounded corners
     if let Some(answer) = app.get_webview_window("answer") {
         let _ = answer.set_shadow(false);
@@ -1351,6 +2086,10 @@ pub fn run() {
             app.manage(ResearchMode(Mutex::new(false)));
             app.manage(SessionId(Mutex::new(None)));
             app.manage(PendingAnswer(Mutex::new(None)));
+            app.manage(AgentManager {
+                agents: Mutex::new(HashMap::new()),
+                cancel_senders: Mutex::new(HashMap::new()),
+            });
 
             // Try to load saved token from store
             match app.store("auth.json") {
@@ -1422,7 +2161,12 @@ pub fn run() {
                         let _ = splash.set_focus();
                     }
                 } else {
-                    eprintln!("[nudge] auth token found — skipping splash");
+                    eprintln!("[nudge] auth token found — showing dashboard");
+                    if let Some(dashboard) = app.get_webview_window("dashboard") {
+                        let _ = dashboard.center();
+                        let _ = dashboard.show();
+                        let _ = dashboard.set_focus();
+                    }
                 }
             }
 
@@ -1489,6 +2233,7 @@ pub fn run() {
             get_auth_state,
             set_auth_token,
             show_input,
+            show_dashboard,
             get_keybinds,
             set_keybind,
             pause_shortcuts,
@@ -1496,11 +2241,28 @@ pub fn run() {
             check_for_update,
             install_update,
             set_grounding,
+            enumerate_windows,
+            create_agent,
+            get_agents,
+            delete_agent,
+            update_agent,
+            start_agent,
+            stop_agent,
+            send_agent_message,
         ])
         .on_window_event(|window, event| {
             if window.label() == "input" {
                 if let WindowEvent::Focused(false) = event {
                     let _ = window.hide();
+                }
+            }
+            // Reapply rounded corners on resize for resizable frameless windows
+            if let WindowEvent::Resized(_) = event {
+                let label = window.label().to_string();
+                if label == "answer" {
+                    if let Some(wv) = window.app_handle().get_webview_window(&label) {
+                        apply_rounded_corners(&wv, 16);
+                    }
                 }
             }
         })

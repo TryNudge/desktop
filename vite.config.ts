@@ -28,6 +28,7 @@ export default defineConfig({
         control: resolve(__dirname, 'pages/control.html'),
         answer: resolve(__dirname, 'pages/answer.html'),
         settings: resolve(__dirname, 'pages/settings.html'),
+        dashboard: resolve(__dirname, 'pages/dashboard.html'),
       },
     },
   },

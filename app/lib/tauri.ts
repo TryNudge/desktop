@@ -27,6 +27,7 @@ export const getPendingAnswer = () =>
 
 // Window
 export const showInput = () => invoke<void>('show_input')
+export const showDashboard = () => invoke<void>('show_dashboard')
 
 // Keybinds
 export const getKeybinds = () => invoke<Keybinds>('get_keybinds')
@@ -42,3 +43,21 @@ export const installUpdate = () => invoke<void>('install_update')
 // Grounding
 export const setGrounding = (settings: string) =>
   invoke<void>('set_grounding', { settings })
+
+// Agents
+export const enumerateWindows = () => invoke<unknown[]>('enumerate_windows')
+export const createAgent = (data: {
+  name: string
+  windows: { hwnd: number; title: string; processName: string }[]
+  interval: number
+  goal: string
+  mode: string
+}) => invoke<unknown>('create_agent', data)
+export const getAgents = () => invoke<unknown[]>('get_agents')
+export const deleteAgent = (id: string) => invoke<void>('delete_agent', { id })
+export const updateAgent = (id: string, data: Record<string, unknown>) =>
+  invoke<unknown>('update_agent', { id, ...data })
+export const startAgent = (id: string) => invoke<void>('start_agent', { id })
+export const stopAgent = (id: string) => invoke<void>('stop_agent', { id })
+export const sendAgentMessage = (id: string, content: string) =>
+  invoke<void>('send_agent_message', { id, content })
